@@ -2,7 +2,7 @@
 Contributors: withflex, davidbarratt
 Tags: hsa, fsa, health savings account, flexible spending account
 Requires at least: 6.8
-Tested up to: 6.8.1
+Tested up to: 6.8
 Stable tag: 2.0.0
 Requires PHP: 8.1
 License: GPLv3 or later
