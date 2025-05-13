@@ -1,0 +1,17 @@
+{
+	"require": {
+		"automattic/jetpack-autoloader": "^5",
+		"symfony/polyfill-php84": "^1.31"
+	},
+	"autoload": {
+		"psr-4": {
+			"Flex\\": "src"
+		}
+	},
+	"config": {
+		"optimize-autoloader": true,
+		"allow-plugins": {
+			"automattic/jetpack-autoloader": true
+		}
+	}
+}
