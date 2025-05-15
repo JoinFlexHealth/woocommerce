@@ -55,7 +55,8 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 
 == Changelog ==
 
-= 2.0.1 =
+= 2.1.0 =
+* Added the `cancel_url` to the checkout session which allows customers to return to the WooCommerce checkout.
 * Changed the default setting of `enabled` to `no`. This makes it more clear that the API Key must be provided in order
   to enable the payment method.
 

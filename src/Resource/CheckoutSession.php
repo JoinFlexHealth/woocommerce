@@ -45,6 +45,7 @@ class CheckoutSession extends Resource implements ResourceInterface {
 	 * @param ?bool                           $test_mode If the checkout session was created in test mode.
 	 * @param ?CheckoutSessionShippingOptions $shipping_options The shipping options if there are any.
 	 * @param ?CheckoutSessionTaxRate         $tax_rate The tax if there is one.
+	 * @param ?string                         $cancel_url The url to use to cancel the checkout session.
 	 */
 	public function __construct(
 		protected string $success_url,
@@ -59,6 +60,7 @@ class CheckoutSession extends Resource implements ResourceInterface {
 		protected ?bool $test_mode = null,
 		protected ?CheckoutSessionShippingOptions $shipping_options = null,
 		protected ?CheckoutSessionTaxRate $tax_rate = null,
+		protected ?string $cancel_url = null,
 	) {}
 
 	/**
@@ -108,6 +110,7 @@ class CheckoutSession extends Resource implements ResourceInterface {
 			'line_items'          => $this->line_items,
 			'client_reference_id' => $this->client_reference_id,
 			'mode'                => $this->mode->value,
+			'cancel_url'          => $this->cancel_url,
 		);
 
 		if ( null !== $this->shipping_options ) {
@@ -151,6 +154,7 @@ class CheckoutSession extends Resource implements ResourceInterface {
 			test_mode: $order->meta_exists( self::META_PREFIX . self::KEY_TEST_MODE ) ? wc_string_to_bool( $order->get_meta( self::META_PREFIX . self::KEY_TEST_MODE ) ) : self::payment_gateway()->is_in_test_mode(),
 			shipping_options: ! empty( $order->get_shipping_methods() ) ? CheckoutSessionShippingOptions::from_wc( $order ) : null,
 			tax_rate: $tax_rate->amount() > 0 ? $tax_rate : null,
+			cancel_url: wc_get_checkout_url(),
 		);
 
 		$checkout_session->wc = $order;
@@ -273,6 +277,7 @@ class CheckoutSession extends Resource implements ResourceInterface {
 		$this->test_mode           = $checkout_session['test_mode'] ?? $this->test_mode;
 		$this->shipping_options    = isset( $checkout_session['shipping_options'] ) ? CheckoutSessionShippingOptions::from_flex( $checkout_session['shipping_options'] ) : $this->shipping_options;
 		$this->tax_rate            = isset( $checkout_session['tax_rate'] ) ? CheckoutSessionTaxRate::from_flex( $checkout_session['tax_rate'] ) : $this->tax_rate;
+		$this->cancel_url          = $checkout_session['cancel_url'] ?? $this->cancel_url;
 	}
 
 	/**
