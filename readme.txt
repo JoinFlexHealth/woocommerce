@@ -55,6 +55,10 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 
 == Changelog ==
 
+= 2.0.1 =
+* Changed the default setting of `enabled` to `no`. This makes it more clear that the API Key must be provided in order
+  to enable the payment method.
+
 = 2.0.0 =
 * Renamed plugin to "Pay with Flex" (`pay-with-flex`).
 * Renamed `WC_FLEX_API_KEY` to `FLEX_API_KEY`.

@@ -161,7 +161,7 @@ class PaymentGateway extends \WC_Payment_Gateway {
 				'title'   => __( 'Enable/Disable', 'pay-with-flex' ),
 				'type'    => 'checkbox',
 				'label'   => __( 'Enable Flex', 'pay-with-flex' ),
-				'default' => 'yes',
+				'default' => 'no',
 			),
 			self::API_KEY => array(
 				'title'             => __( 'API Key', 'pay-with-flex' ),
