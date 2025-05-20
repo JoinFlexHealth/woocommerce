@@ -1,6 +1,6 @@
 === Pay with Flex ===
 Contributors: withflex, davidbarratt
-Tags: hsa, fsa, health savings account, flexible spending account
+Tags: hsa, fsa, payments, woocommerce
 Requires at least: 6.8
 Tested up to: 6.8
 Stable tag: 2.1.1
