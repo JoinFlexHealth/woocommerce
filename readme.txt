@@ -3,7 +3,7 @@ Contributors: withflex, davidbarratt
 Tags: hsa, fsa, payments, woocommerce
 Requires at least: 6.8
 Tested up to: 6.8
-Stable tag: 2.1.1
+Stable tag: 2.1.2
 Requires PHP: 8.1
 License: GPLv3 or later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -54,6 +54,9 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 4. Flex promotes your brand to engaged buyers looking to spend the $150B in HSA/FSA accounts.
 
 == Changelog ==
+
+= 2.1.2 =
+* Added additional context (checkout_session_id) to exceptions.
 
 = 2.1.1 =
 * Removing the `assets` directory which is not required to be included in the plugin.

@@ -38,4 +38,11 @@ class FlexResponseException extends FlexException {
 	public function code(): string|int {
 		return wp_remote_retrieve_response_code( $this->response );
 	}
+
+	/**
+	 * {@inheritdoc}
+	 */
+	public function getContext(): array {
+		return $this->response;
+	}
 }

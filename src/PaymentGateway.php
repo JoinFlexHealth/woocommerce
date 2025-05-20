@@ -86,7 +86,14 @@ class PaymentGateway extends \WC_Payment_Gateway {
 			$checkout_session->exec( $checkout_session->needs() );
 
 			if ( $checkout_session->amount_total() !== CheckoutSession::currency_to_unit_amount( $order->get_total() ) ) {
-				throw new FlexException( 'Flex Checkout Session amount_total does not equal WooCommerce Order total.' );
+				throw new FlexException(
+					message: 'Flex Checkout Session amount_total does not equal WooCommerce Order total.',
+					context: array(
+						'checkout_session_id' => $checkout_session->id(),
+						'order_id'            => $order->get_id(),
+						'order_total'         => $order->get_total(),
+					),
+				);
 			}
 
 			$order->set_status( OrderStatus::PENDING, __( 'Awaiting Flex Payment', 'pay-with-flex' ) );
@@ -108,9 +115,12 @@ class PaymentGateway extends \WC_Payment_Gateway {
 		} catch ( FlexException $previous ) {
 			$this->logger->error(
 				$previous->getMessage(),
-				array(
-					'order_id' => $order_id,
-				)
+				array_merge(
+					$previous->getContext(),
+					array(
+						'order_id' => $order_id,
+					),
+				),
 			);
 
 			if ( true === \WP_DEBUG ) {
