@@ -57,14 +57,14 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 
 = 2.1.2 =
 * Added additional context (checkout_session_id) to exceptions.
+* Added exception reporting. When an exception is thrown within the plugin, the exception is reported to Flex for investigation.
 
 = 2.1.1 =
 * Removing the `assets` directory which is not required to be included in the plugin.
 
 = 2.1.0 =
 * Added the `cancel_url` to the checkout session which allows customers to return to the WooCommerce checkout.
-* Changed the default setting of `enabled` to `no`. This makes it more clear that the API Key must be provided in order
-  to enable the payment method.
+* Changed the default setting of `enabled` to `no`. This makes it more clear that the API Key must be provided in order to enable the payment method.
 
 = 2.0.0 =
 * Renamed plugin to "Pay with Flex" (`pay-with-flex`).

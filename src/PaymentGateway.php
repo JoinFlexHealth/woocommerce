@@ -13,6 +13,7 @@ use Automattic\WooCommerce\Enums\OrderStatus;
 use Flex\Exception\FlexException;
 use Flex\Resource\CheckoutSession;
 use Flex\Resource\Webhook;
+use Sentry\State\Scope;
 
 /**
  * Flex Payment Gateway.
@@ -74,16 +75,45 @@ class PaymentGateway extends \WC_Payment_Gateway {
 			)
 		);
 
+		$order = wc_get_order( $order_id );
+
+		sentry()->configureScope(
+			function ( Scope $scope ) use ( $order ): void {
+				$scope->setContext(
+					'Order',
+					array_merge(
+						$order->get_base_data(),
+						array(
+							'line_items' => array_map( fn( $item ) => $item->get_data(), $order->get_items() ),
+							'total'      => $order->get_total(),
+						)
+					)
+				);
+			},
+		);
+
 		try {
 			// Ensure the Webhooks are up to date.
 			$webhook = Webhook::from_wc( $this );
 			$webhook->exec( $webhook->needs() );
 
-			$order            = wc_get_order( $order_id );
 			$checkout_session = CheckoutSession::from_wc( $order );
 
 			// Forcibly apply any required updates.
 			$checkout_session->exec( $checkout_session->needs() );
+
+			sentry()->configureScope(
+				function ( Scope $scope ) use ( $checkout_session ): void {
+					$scope->setTags(
+						array(
+							'checkout_session'           => $checkout_session->id(),
+							'checkout_session.test_mode' => wc_bool_to_string( $checkout_session->test_mode() ),
+						)
+					);
+
+					$scope->setContext( 'Checkout Session', $checkout_session->jsonSerialize() );
+				},
+			);
 
 			if ( $checkout_session->amount_total() !== CheckoutSession::currency_to_unit_amount( $order->get_total() ) ) {
 				throw new FlexException(
@@ -123,8 +153,14 @@ class PaymentGateway extends \WC_Payment_Gateway {
 				),
 			);
 
-			if ( true === \WP_DEBUG ) {
+			sentry()->captureException(
+				new \Exception(
+					message: 'Payment processing failure',
+					previous: $previous,
+				)
+			);
 
+			if ( true === \WP_DEBUG ) {
 				// Throw the underlying error message which will be displayed the user.
 				if ( true === \WP_DEBUG_DISPLAY ) {
 					throw $previous;

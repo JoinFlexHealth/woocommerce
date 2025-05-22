@@ -26,6 +26,16 @@ use Flex\Resource\LineItem;
 use Flex\Resource\Price;
 use Flex\Resource\Product;
 use Flex\Resource\Webhook;
+use Sentry\ClientBuilder;
+use Sentry\Context\OsContext;
+use Sentry\Context\RuntimeContext;
+use Sentry\Event;
+use Sentry\Integration\RequestFetcher;
+use Sentry\Severity;
+use Sentry\State\Hub;
+use Sentry\State\HubInterface;
+use Sentry\State\Scope;
+use Sentry\Util\PHPVersion;
 
 /**
  * Add the autoloader and action schedular.
@@ -38,6 +48,220 @@ require_once plugin_dir_path( __FILE__ ) . '/vendor/autoload_packages.php';
 function payment_gateway(): PaymentGateway {
 	return WC()->payment_gateways()->payment_gateways()['flex'] ?? new PaymentGateway( actions: false );
 }
+
+/**
+ * Returns a Sentry client for this plugin.
+ *
+ * Sentry's default integrations do not register because they only register on the global Sentry instance which we do
+ * not want to override. Therefore, only exceptions that explicitly use `captureException` will be logged.
+ */
+function sentry(): HubInterface {
+	static $hub = null;
+
+	if ( null === $hub ) {
+		$data = get_plugin_data( __FILE__ );
+
+		$client = ClientBuilder::create(
+			array(
+				'dsn'            => 'https://7d4678d6fe3174eb2a6817500256e5d3@o4505602776694784.ingest.us.sentry.io/4509358008958976',
+				'environment'    => wp_get_environment_type(),
+				'release'        => $data['Version'],
+				'in_app_include' => array( __DIR__ ),
+				// Exclude any events that are not "in app" as defined above.
+				'before_send'    => function ( Event $event ): ?Event {
+					$trace = $event->getStacktrace();
+					$exceptions = $event->getExceptions();
+
+					// There is no stack trace so record the event.
+					// We may need to extend the `Event` class and use `captureEvent` in place of `captureMessage`.
+					if ( null === $trace && empty( $exceptions ) ) {
+						return $event;
+					}
+
+					$trace = $event->getStacktrace();
+					if ( null !== $trace ) {
+						foreach ( $trace->getFrames() as $frame ) {
+							if ( $frame->isInApp() ) {
+								return $event;
+							}
+						}
+					}
+
+					foreach ( $exceptions as $exception ) {
+						$trace = $exception->getStacktrace();
+						if ( null === $trace ) {
+							continue;
+						}
+
+						foreach ( $trace->getFrames() as $frame ) {
+							if ( $frame->isInApp() ) {
+								return $event;
+							}
+						}
+					}
+
+					return null;
+				},
+			)
+		)->getClient();
+
+		$hub = new Hub( $client );
+
+		$hub->configureScope(
+			function ( Scope $scope ) {
+
+				$scope->setTags(
+					array(
+						'site'           => get_bloginfo( 'name' ),
+						'site.url'       => home_url(),
+						'flex.test_mode' => wc_bool_to_string( payment_gateway()->is_in_test_mode() ),
+					),
+				);
+
+				$scope->addEventProcessor(
+					function ( Event $event ) {
+						/**
+						 * Add the request information.
+						 *
+						 * @see {@link https://github.com/getsentry/sentry-php/blob/4.11.1/src/Integration/RequestIntegration.php#L120-L166}
+						 */
+						if ( empty( $event->getRequest() ) ) {
+							$request = new RequestFetcher()->fetchRequest();
+							if ( null !== $request ) {
+								$headers = array();
+
+								$header_names = array( 'host', 'user-agent', 'referer', 'origin' );
+								foreach ( $header_names as $name ) {
+									$values = $request->getHeader( $name );
+									if ( empty( $values ) ) {
+										continue;
+									}
+
+									$headers[ $name ] = $values;
+								}
+
+								$request_data = array(
+									'url'     => (string) $request->getUri(),
+									'method'  => $request->getMethod(),
+									'headers' => $headers,
+								);
+
+								if ( $request->getUri()->getQuery() ) {
+									$request_data['query_string'] = $request->getUri()->getQuery();
+								}
+
+								$event->setRequest( $request_data );
+							}
+						}
+
+						/**
+						 * Add the module information.
+						 *
+						 * @see {@link https://github.com/getsentry/sentry-php/blob/master/src/Integration/ModulesIntegration.php#L36}
+						 */
+						if ( empty( $event->getModules() ) ) {
+
+							$modules = array(
+								'wordpress' => wp_get_wp_version(),
+							);
+
+							foreach ( get_plugins() as $plugin => $info ) {
+								if ( ! is_plugin_active( $plugin ) ) {
+									continue;
+								}
+
+								$modules[ $plugin ] = $info['Version'];
+							}
+
+							$theme                               = wp_get_theme();
+							$modules[ $theme->get_stylesheet() ] = $theme->version;
+
+							$event->setModules( $modules );
+						}
+
+						/**
+						 * Add the runtime information.
+						 *
+						 * @see {@link https://github.com/getsentry/sentry-php/blob/master/src/Integration/EnvironmentIntegration.php#L38-L53}
+						 */
+						if ( null === $event->getRuntimeContext() ) {
+							$event->setRuntimeContext(
+								new RuntimeContext(
+									name: 'php',
+									version: PHPVersion::parseVersion(),
+									sapi: \PHP_SAPI
+								),
+							);
+						}
+
+						/**
+						 * Add the OS information
+						 *
+						 * @see {@link https://github.com/getsentry/sentry-php/blob/master/src/Integration/EnvironmentIntegration.php#L55-L82}
+						 */
+						if ( null === $event->getOsContext() && \function_exists( 'php_uname' ) ) {
+							$event->setOsContext(
+								new OsContext(
+									name: php_uname( 's' ),
+									version: php_uname( 'r' ),
+									build: php_uname( 'v' ),
+									kernelVersion: php_uname( 'a' ),
+									machineType: php_uname( 'm' ),
+								),
+							);
+						}
+
+						return $event;
+					}
+				);
+			}
+		);
+	}
+
+	return $hub;
+}
+
+/**
+ * Plugins Loaded hook.
+ *
+ * Performs actions after all of the plugins have loaded.
+ */
+function plugins_loaded() {
+	// Setup Sentry.
+	sentry();
+}
+add_action(
+	hook_name: 'plugins_loaded',
+	callback: __NAMESPACE__ . '\plugins_loaded',
+);
+
+/**
+ * Activate the plugin.
+ */
+function activate() {
+	sentry()->captureMessage(
+		message: 'Plugin activated',
+		level: Severity::info(),
+	);
+}
+register_activation_hook(
+	file: __FILE__,
+	callback: __NAMESPACE__ . '\activate'
+);
+
+/**
+ * Deactivate the plugin.
+ */
+function deactivate() {
+	sentry()->captureMessage(
+		message: 'Plugin deactivated',
+		level: Severity::warning(),
+	);
+}
+register_deactivation_hook(
+	file: __FILE__,
+	callback: __NAMESPACE__ . '\deactivate'
+);
 
 /**
  * Enqueue an async action with an exponential back-off.
@@ -386,6 +610,11 @@ function update_option_wc_flex_settings( mixed $old_value, mixed $value ): void 
 
 	// Payment method activation.
 	if ( 'yes' === $value['enabled'] && ( null === $old_value || ! isset( $old_value['enabled'] ) || 'no' === $old_value['enabled'] ) ) {
+		sentry()->captureMessage(
+			message: 'Payment method enabled',
+			level: Severity::info(),
+		);
+
 		// If no API key is present, then there is nothing to do.
 		if ( empty( $gateway->api_key() ) ) {
 			return;
@@ -420,6 +649,11 @@ function update_option_wc_flex_settings( mixed $old_value, mixed $value ): void 
 			}
 		}
 	} elseif ( 'no' === $value['enabled'] && 'yes' === $old_value['enabled'] ) { // Payment method deactivation.
+		sentry()->captureMessage(
+			message: 'Payment method disabled',
+			level: Severity::warning(),
+		);
+
 		// Check to see if the webhook needs to be updated.
 		$webhook = Webhook::from_wc( $gateway );
 		if ( $webhook->can( $webhook->needs() ) ) {

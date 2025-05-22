@@ -12,8 +12,10 @@ namespace Flex\Resource;
 use Flex\Exception\FlexException;
 use Flex\Exception\FlexResponseException;
 use Flex\PaymentGateway;
+use Sentry\Breadcrumb;
 
 use function Flex\payment_gateway;
+use function Flex\sentry;
 
 /**
  * Flex Product
@@ -71,6 +73,7 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 	 *
 	 * @throws FlexException When things don't go well.
 	 * @throws FlexResponseException When Flex responds with something other than OK.
+	 * @throws \Throwable If the JSON decoding fails.
 	 */
 	protected static function remote_request( string $path, array $args = array() ): array {
 		$api_key = self::payment_gateway()->api_key();
@@ -80,18 +83,38 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 
 		$base = defined( 'FLEX_API_URL' ) ? \FLEX_API_URL : 'https://api.withflex.com';
 
+		$headers = array(
+			'Authorization' => 'Bearer ' . $api_key,
+			'Content-Type'  => 'application/json',
+			'Accept'        => 'application/json',
+			'Origin'        => home_url(),
+			'Referer'       => home_url( add_query_arg( array() ) ),
+		);
+
+		$span = sentry()->getSpan();
+		if ( null !== $span ) {
+			$headers['traceparent'] = $span->toW3CTraceparent();
+		}
+
+		/**
+		 * The metadata to add to the breadcrumb
+		 * https://develop.sentry.dev/sdk/data-model/event-payloads/breadcrumbs/#breadcrumb-types
+		 */
+		$meta = array(
+			'method' => $args['method'] ?? 'GET',
+			'url'    => $base . $path,
+		);
+
+		if ( isset( $args['flex']['data'] ) ) {
+			$meta['request'] = $args['flex']['data'];
+		}
+
 		$response = wp_remote_request(
 			$base . $path,
 			array_merge(
 				array(
 					'headers' => array_merge(
-						array(
-							'Authorization' => 'Bearer ' . $api_key,
-							'Content-Type'  => 'application/json',
-							'Accept'        => 'application/json',
-							'Origin'        => home_url(),
-							'Referer'       => home_url( add_query_arg( array() ) ),
-						),
+						$headers,
 						$args['headers'] ?? array(),
 					),
 					'body'    => $args['body'] ?? isset( $args['flex']['data'] ) ? wp_json_encode( $args['flex']['data'] ) : null,
@@ -101,13 +124,31 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 		);
 
 		if ( is_wp_error( $response ) ) {
+			sentry()->addBreadcrumb(
+				new Breadcrumb(
+					category: 'request',
+					level: Breadcrumb::LEVEL_ERROR,
+					type: Breadcrumb::TYPE_HTTP,
+					metadata: $meta,
+				)
+			);
 			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 			throw new FlexException( $response->get_error_message() );
 		}
 
 		$code = wp_remote_retrieve_response_code( $response );
 
+		$meta['status_code'] = $code;
+
 		if ( $code < 200 || $code >= 300 ) {
+			sentry()->addBreadcrumb(
+				new Breadcrumb(
+					category: 'request',
+					level: Breadcrumb::LEVEL_ERROR,
+					type: Breadcrumb::TYPE_HTTP,
+					metadata: $meta,
+				)
+			);
 			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 			throw new FlexResponseException( $response, 'Flex responded with a ' . $code );
 		}
@@ -115,15 +156,52 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 		$body = wp_remote_retrieve_body( $response );
 
 		if ( ! $body ) {
+			sentry()->addBreadcrumb(
+				new Breadcrumb(
+					category: 'request',
+					level: Breadcrumb::LEVEL_ERROR,
+					type: Breadcrumb::TYPE_HTTP,
+					metadata: $meta,
+				),
+			);
 			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 			throw new FlexResponseException( $response, 'Missing response body.' );
 		}
 
-		return json_decode(
-			json: $body,
-			associative: true,
-			flags: JSON_THROW_ON_ERROR
-		);
+		try {
+			$data = json_decode(
+				json: $body,
+				associative: true,
+				flags: JSON_THROW_ON_ERROR
+			);
+
+			$meta['response'] = $data;
+
+			sentry()->addBreadcrumb(
+				new Breadcrumb(
+					category: 'request',
+					level: Breadcrumb::LEVEL_INFO,
+					type: Breadcrumb::TYPE_HTTP,
+					metadata: $meta,
+				),
+			);
+
+			return $data;
+		} catch ( \Throwable $e ) {
+
+			$meta['response'] = $body;
+
+			sentry()->addBreadcrumb(
+				new Breadcrumb(
+					category: 'request',
+					level: Breadcrumb::LEVEL_ERROR,
+					type: Breadcrumb::TYPE_HTTP,
+					metadata: $meta,
+				),
+			);
+
+			throw $e;
+		}
 	}
 
 	/**
