@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name:      Pay with Flex
+ * Plugin Name:      Flex HSA/FSA Payments
  * Description:      Accept HSA/FSA payments directly in the checkout flow.
  * Version:          2.1.2
  * Plugin URI:       https://wordpress.org/plugins/pay-with-flex/

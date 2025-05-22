@@ -1,4 +1,4 @@
-=== Pay with Flex ===
+=== Flex HSA/FSA Payments ===
 Contributors: withflex, davidbarratt
 Tags: hsa, fsa, payments, woocommerce
 Requires at least: 6.8
