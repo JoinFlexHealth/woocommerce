@@ -2,7 +2,7 @@
 /**
  * Plugin Name:      Flex HSA/FSA Payments
  * Description:      Accept HSA/FSA payments directly in the checkout flow.
- * Version:          2.1.2
+ * Version:          2.1.3
  * Plugin URI:       https://wordpress.org/plugins/pay-with-flex/
  * Author:           Flex
  * Author URI:       https://withflex.com/
@@ -126,7 +126,7 @@ function sentry(): HubInterface {
 						 * @see {@link https://github.com/getsentry/sentry-php/blob/4.11.1/src/Integration/RequestIntegration.php#L120-L166}
 						 */
 						if ( empty( $event->getRequest() ) ) {
-							$request = new RequestFetcher()->fetchRequest();
+							$request = ( new RequestFetcher() )->fetchRequest();
 							if ( null !== $request ) {
 								$headers = array();
 
