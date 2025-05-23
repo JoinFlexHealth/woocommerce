@@ -63,12 +63,13 @@ function sentry(): HubInterface {
 
 		$client = ClientBuilder::create(
 			array(
-				'dsn'            => 'https://7d4678d6fe3174eb2a6817500256e5d3@o4505602776694784.ingest.us.sentry.io/4509358008958976',
-				'environment'    => wp_get_environment_type(),
-				'release'        => $data['Version'],
-				'in_app_include' => array( __DIR__ ),
+				'dsn'                  => 'https://7d4678d6fe3174eb2a6817500256e5d3@o4505602776694784.ingest.us.sentry.io/4509358008958976',
+				'environment'          => wp_get_environment_type(),
+				'release'              => $data['Version'],
+				'in_app_include'       => array( __DIR__ ),
+				'default_integrations' => false,
 				// Exclude any events that are not "in app" as defined above.
-				'before_send'    => function ( Event $event ): ?Event {
+				'before_send'          => function ( Event $event ): ?Event {
 					$trace = $event->getStacktrace();
 					$exceptions = $event->getExceptions();
 
