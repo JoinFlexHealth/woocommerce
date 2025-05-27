@@ -2,13 +2,14 @@
 /**
  * Plugin Name:      Flex HSA/FSA Payments
  * Description:      Accept HSA/FSA payments directly in the checkout flow.
- * Version:          2.1.3
+ * Version:          2.2.0
  * Plugin URI:       https://wordpress.org/plugins/pay-with-flex/
  * Author:           Flex
  * Author URI:       https://withflex.com/
  * License:          GPL-3.0-or-later
  * Requires PHP:     8.1
  * Requires Plugins: woocommerce
+ * Text Domain:      pay-with-flex
  *
  * @package Flex
  */
@@ -41,6 +42,8 @@ use Sentry\Util\PHPVersion;
  * Add the autoloader and action schedular.
  */
 require_once plugin_dir_path( __FILE__ ) . '/vendor/autoload_packages.php';
+
+const PLUGIN_FILE = __FILE__;
 
 /**
  * Flex Payment Gateway
@@ -676,6 +679,16 @@ add_action(
 add_filter(
 	hook_name: 'woocommerce_payment_gateways',
 	callback: array( PaymentGateway::class, 'wc_payment_gateways' ),
+);
+
+/**
+ * Add the Payment Method.
+ *
+ * @param string[] $methods An array of Payment method classes.
+ */
+add_filter(
+	hook_name: 'woocommerce_blocks_payment_method_type_registration',
+	callback: array( PaymentMethod::class, 'wc_blocks_payment_method_type_registration' ),
 );
 
 /**
