@@ -3,7 +3,7 @@ Contributors: withflex, davidbarratt
 Tags: hsa, fsa, payments, woocommerce
 Requires at least: 6.8
 Tested up to: 6.8
-Stable tag: 2.2.0
+Stable tag: 2.3.0
 Requires PHP: 8.1
 License: GPLv3 or later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -54,6 +54,9 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 4. Flex promotes your brand to engaged buyers looking to spend the $150B in HSA/FSA accounts.
 
 == Changelog ==
+
+= 2.3.0 =
+* Added the `FLEX_TELEMETRY` constant which allows users to opt-out of telemetry by setting the constant to `false`.
 
 = 2.2.0 =
 * Added support for [WooCommerce block-based checkout](https://woocommerce.com/checkout-blocks/).
