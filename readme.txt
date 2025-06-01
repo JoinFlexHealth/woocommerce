@@ -57,6 +57,7 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 
 = 2.3.0 =
 * Added the `FLEX_TELEMETRY` constant which allows users to opt-out of telemetry by setting the constant to `false`.
+* Fixed `PHP Notice: Function _load_textdomain_just_in_time was called incorrectly.`
 
 = 2.2.0 =
 * Added support for [WooCommerce block-based checkout](https://woocommerce.com/checkout-blocks/).

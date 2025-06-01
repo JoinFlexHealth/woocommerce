@@ -23,6 +23,20 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	protected const API_KEY = 'api_key';
 
 	/**
+	 * {@inheritdoc}
+	 *
+	 * @var string
+	 */
+	public $id = 'flex';
+
+	/**
+	 * {@inheritdoc}
+	 *
+	 * @var bool
+	 */
+	public $has_fields = false;
+
+	/**
 	 * Logger.
 	 *
 	 * @var \WC_Logger_Interface
@@ -35,20 +49,32 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	 * @param bool $actions Register the action handlers.
 	 */
 	public function __construct( bool $actions = true ) {
-		$this->id                 = 'flex';
-		$this->title              = __( 'Flex | Pay with HSA/FSA', 'pay-with-flex' );
-		$this->method_title       = __( 'Flex', 'pay-with-flex' );
-		$this->method_description = __( 'Accept HSA/FSA payments directly in the checkout flow.', 'pay-with-flex' );
-		$this->has_fields         = false;
-		$this->logger             = wc_get_logger();
+		$this->logger = wc_get_logger();
 
-		$this->init_form_fields();
 		$this->init_settings();
 
+		if ( did_action( 'init' ) ) {
+			$this->init();
+		}
+
 		if ( $actions ) {
+			// Translation cannot be used until after `init`.
+			if ( ! did_action( 'init' ) ) {
+				add_action( 'init', array( $this, 'init' ) );
+			}
 			// @phpstan-ignore return.void
 			add_action( 'woocommerce_update_options_payment_gateways_' . $this->id, array( $this, 'process_admin_options' ) );
 		}
+	}
+
+	/**
+	 * Initialize the Payment Gateway.
+	 */
+	public function init() {
+		$this->title              = __( 'Flex | Pay with HSA/FSA', 'pay-with-flex' );
+		$this->method_title       = __( 'Flex', 'pay-with-flex' );
+		$this->method_description = __( 'Accept HSA/FSA payments directly in the checkout flow.', 'pay-with-flex' );
+		$this->init_form_fields();
 	}
 
 	/**

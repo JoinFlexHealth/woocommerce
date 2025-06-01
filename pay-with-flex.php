@@ -62,7 +62,10 @@ function sentry(): HubInterface {
 	static $hub = null;
 
 	if ( null === $hub ) {
-		$data = get_plugin_data( __FILE__ );
+		$data = get_plugin_data(
+			plugin_file: __FILE__,
+			translate: false
+		);
 
 		$client = ClientBuilder::create(
 			array(
