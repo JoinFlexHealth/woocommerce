@@ -45,12 +45,16 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 	 * @param int|float|string $value The currency value to convert to a unit amount.
 	 */
 	public static function currency_to_unit_amount( int|float|string $value ): int {
+		if ( is_string( $value ) ) {
+			// Remove a negative sign, currency symbols, etc.
+			$currency_symbol = html_entity_decode( get_woocommerce_currency_symbol() );
+			$value           = trim( $value, $currency_symbol . "- \n\r\t\v\0" );
+		} else {
+			$value = abs( $value );
+		}
+
 		// Split the string based on the decimal separator.
-		$parts = explode(
-			wc_get_price_decimal_separator(),
-			// Convert to a string, remove the currency symbol if there is one, and trim.
-			trim( str_replace( get_woocommerce_currency_symbol(), '', (string) $value ) )
-		);
+		$parts = explode( wc_get_price_decimal_separator(), (string) $value );
 
 		return intval(
 			// Remove the thousand separator and concatenate the dollars with the padded cents.

@@ -2,7 +2,7 @@
 /**
  * Plugin Name:      Flex HSA/FSA Payments
  * Description:      Accept HSA/FSA payments directly in the checkout flow.
- * Version:          2.3.0
+ * Version:          3.0.0
  * Plugin URI:       https://wordpress.org/plugins/pay-with-flex/
  * Author:           Flex
  * Author URI:       https://withflex.com/
@@ -23,7 +23,7 @@ use Flex\Controller\OrderController;
 use Flex\Controller\WebhookController;
 use Flex\Exception\FlexException;
 use Flex\PaymentGateway;
-use Flex\Resource\LineItem;
+use Flex\Resource\CheckoutSession\LineItem;
 use Flex\Resource\Price;
 use Flex\Resource\Product;
 use Flex\Resource\Webhook;

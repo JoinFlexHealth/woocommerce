@@ -7,9 +7,9 @@
 
 declare(strict_types=1);
 
-namespace Flex\Resource;
+namespace Flex\Resource\CheckoutSession;
 
-enum CheckoutSessionMode: string {
+enum Mode: string {
 	case PAYMENT      = 'payment';
 	case SUBSCRIPTION = 'subscription';
 }

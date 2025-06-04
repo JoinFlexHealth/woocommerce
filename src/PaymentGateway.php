@@ -11,8 +11,11 @@ namespace Flex;
 
 use Automattic\WooCommerce\Enums\OrderStatus;
 use Flex\Exception\FlexException;
-use Flex\Resource\CheckoutSession;
+use Flex\Resource\CheckoutSession\CheckoutSession;
+use Flex\Resource\CheckoutSession\Refund\Refund;
+use Flex\Resource\ResourceAction;
 use Flex\Resource\Webhook;
+use Sentry\Breadcrumb;
 use Sentry\State\Scope;
 
 /**
@@ -35,6 +38,13 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	 * @var bool
 	 */
 	public $has_fields = false;
+
+	/**
+	 * {@inheritdoc}
+	 *
+	 * @var array
+	 */
+	public $supports = array( 'products', 'refunds' );
 
 	/**
 	 * Logger.
@@ -99,6 +109,22 @@ class PaymentGateway extends \WC_Payment_Gateway {
 			array(
 				'order_id' => $order_id,
 			)
+		);
+
+		sentry()->configureScope(
+			function ( Scope $scope ) use ( $order_id ): void {
+				$scope->addBreadcrumb(
+					new Breadcrumb(
+						level: Breadcrumb::LEVEL_INFO,
+						type: Breadcrumb::TYPE_DEFAULT,
+						category: 'payment',
+						message: 'Payment',
+						metadata: array(
+							'order_id' => $order_id,
+						),
+					)
+				);
+			},
 		);
 
 		$order = wc_get_order( $order_id );
@@ -201,6 +227,131 @@ class PaymentGateway extends \WC_Payment_Gateway {
 				previous: $previous, // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 			);
 		}
+	}
+
+	/**
+	 * {@inheritdoc}
+	 *
+	 * @param  int        $order_id Order ID.
+	 * @param  float|null $amount Refund amount.
+	 * @param  string     $reason Refund reason.
+	 * @return bool|\WP_Error True or false based on success, or a WP_Error object.
+	 * @throws FlexException If we can intuit the refund from the amount and reason.
+	 * @throws \Exception When a FlexException is caught.
+	 */
+	public function process_refund( $order_id, $amount = null, $reason = '' ) {
+		sentry()->configureScope(
+			function ( Scope $scope ) use ( $order_id, $amount, $reason ): void {
+				$scope->addBreadcrumb(
+					new Breadcrumb(
+						level: Breadcrumb::LEVEL_INFO,
+						type: Breadcrumb::TYPE_DEFAULT,
+						category: 'refund',
+						message: 'Refund',
+						metadata: array(
+							'order_id' => $order_id,
+							'amount'   => $amount,
+							'reason'   => $reason,
+						),
+					)
+				);
+			},
+		);
+
+		try {
+			$order = wc_get_order( $order_id );
+
+			sentry()->configureScope(
+				function ( Scope $scope ) use ( $order ): void {
+					$scope->setContext(
+						'Order',
+						$order->get_base_data(),
+					);
+				},
+			);
+
+			$checkout_session = CheckoutSession::from_wc( $order );
+
+			sentry()->configureScope(
+				function ( Scope $scope ) use ( $checkout_session ): void {
+					$scope->setTags(
+						array(
+							'checkout_session'           => $checkout_session->id(),
+							'checkout_session.test_mode' => wc_bool_to_string( $checkout_session->test_mode() ),
+						)
+					);
+
+					$scope->setContext( 'Checkout Session', $checkout_session->jsonSerialize() );
+				},
+			);
+
+			$refunds = $order->get_refunds();
+
+			/**
+			 * Retrieve the first refund from the list.
+			 *
+			 * @var \WC_Order_Refund|false
+			 */
+			$refund = reset( $refunds );
+
+			if ( false === $refund ) {
+				throw new FlexException( 'Unable to retrieve refund' );
+			}
+
+			sentry()->configureScope(
+				function ( Scope $scope ) use ( $refund ): void {
+					$scope->setContext(
+						'Refund',
+						$refund->get_base_data()
+					);
+				},
+			);
+
+			if ( $refund->get_amount() !== $amount || $refund->get_reason() !== $reason ) {
+				throw new FlexException( 'Refund amount or reason does not match retrieved refund.' );
+			}
+
+			// Ensure the Webhooks are up to date.
+			$webhook = Webhook::from_wc( $this );
+			$webhook->exec( $webhook->needs() );
+
+			Refund::from_wc( $refund )->exec( ResourceAction::CREATE );
+
+		} catch ( FlexException $previous ) {
+			$this->logger->error(
+				$previous->getMessage(),
+				array_merge(
+					$previous->getContext(),
+					array(
+						'refund_id' => $order_id,
+					),
+				),
+			);
+
+			sentry()->captureException(
+				new \Exception(
+					message: 'Refund processing failure',
+					previous: $previous,
+				)
+			);
+
+			if ( true === \WP_DEBUG ) {
+				// Throw the underlying error message which will be displayed the user.
+				if ( true === \WP_DEBUG_DISPLAY ) {
+					throw $previous;
+				}
+
+				// Log the underlying error message.
+				error_log( $previous->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+			}
+
+			throw new \Exception(
+				message: "We're sorry, there was a problem while attempting to processes the refund with Flex. Please try again later.",
+				previous: $previous, // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+			);
+		}
+
+		return true;
 	}
 
 	/**

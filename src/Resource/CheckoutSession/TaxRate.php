@@ -7,12 +7,14 @@
 
 declare(strict_types=1);
 
-namespace Flex\Resource;
+namespace Flex\Resource\CheckoutSession;
+
+use Flex\Resource\Resource;
 
 /**
  * Flex Shipping Rate
  */
-class CheckoutSessionTaxRate extends Resource {
+class TaxRate extends Resource {
 
 	/**
 	 * WooCommerce Order

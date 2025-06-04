@@ -7,7 +7,11 @@
 
 declare(strict_types=1);
 
-namespace Flex\Resource;
+namespace Flex\Resource\CheckoutSession;
+
+use Flex\Resource\Price;
+use Flex\Resource\Resource;
+use Flex\Resource\ResourceAction;
 
 /**
  * Flex Checkout Session Line Item
@@ -44,6 +48,13 @@ class LineItem extends Resource {
 	}
 
 	/**
+	 * Returns the price associated with the line item.
+	 */
+	public function price(): Price {
+		return $this->price;
+	}
+
+	/**
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
@@ -74,8 +85,16 @@ class LineItem extends Resource {
 	 * @param \WC_Order_Item_Product $item The WooCommerce Order Item.
 	 */
 	public static function from_wc( \WC_Order_Item_Product $item ): self {
+		// If the order has a transaction id associated with it, then the checkout session was completed and the price id
+		// associated with the line item is fixed.
+		if ( $item->get_order()->get_transaction_id() && $item->meta_exists( self::META_PREFIX . self::KEY_PRICE ) ) {
+			$price = new Price( id: $item->get_meta( self::META_PREFIX . self::KEY_PRICE ) );
+		} else {
+			$price = Price::from_wc( $item->get_product() );
+		}
+
 		$line_item = new self(
-			price: Price::from_wc( $item->get_product() ),
+			price: $price,
 			quantity: $item->get_quantity(),
 		);
 

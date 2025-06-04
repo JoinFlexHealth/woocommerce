@@ -10,17 +10,20 @@ declare(strict_types=1);
 namespace Flex\Controller;
 
 use Automattic\WooCommerce\Enums\OrderStatus;
-use Flex\Resource\CheckoutSession;
+use Flex\Exception\FlexException;
+use Flex\Resource\CheckoutSession\CheckoutSession;
+use Flex\Resource\Refund;
+use Flex\Resource\WebhookEvent;
 use Flex\Resource\Webhook;
+use Sentry\Breadcrumb;
 
 use function Flex\payment_gateway;
+use function Flex\sentry;
 
 /**
  * Flex Webhook Controller
  */
 class WebhookController extends Controller {
-
-	protected const CHECKOUT_SESSION_COMPLETED = 'checkout.session.completed';
 
 	/**
 	 * Constructs a new Webhook Controller
@@ -119,11 +122,19 @@ class WebhookController extends Controller {
 
 		$data = $request->get_json_params();
 
+		sentry()->addBreadcrumb(
+			new Breadcrumb(
+				category: 'event',
+				level: Breadcrumb::LEVEL_INFO,
+				type: Breadcrumb::TYPE_DEFAULT,
+				metadata: $data,
+			)
+		);
+
 		if ( ! isset( $data['event_type'] ) ) {
-			$this->logger->error(
-				'[Flex] Webhook Event missing event_type',
-				$context,
-			);
+			$error = new FlexException( 'Webhook event missing event_type' );
+			$this->logger->error( $error->getMessage(), $context );
+			sentry()->captureException( $error );
 			return new \WP_REST_Response(
 				data: array(
 					'error' => 'Webhook Event missing event_type',
@@ -132,13 +143,14 @@ class WebhookController extends Controller {
 			);
 		}
 
-		if ( self::CHECKOUT_SESSION_COMPLETED !== $data['event_type'] ) {
-			$context['event_type'] = $data['event_type'];
+		$context['event_type'] = $data['event_type'];
 
-			$this->logger->error(
-				'[Flex] Cannot handle event type',
-				$context,
-			);
+		$type = WebhookEvent::tryFrom( $data['event_type'] );
+
+		if ( null === $type ) {
+			$error = new FlexException( 'Cannot handle event type' );
+			$this->logger->error( $error->getMessage(), $context );
+			sentry()->captureException( $error );
 			return new \WP_REST_Response(
 				data: array(
 					'error' => 'Cannot handle webhook of type ' . esc_html( $data['event_type'] ),
@@ -147,47 +159,106 @@ class WebhookController extends Controller {
 			);
 		}
 
-		if ( ! isset( $data['object']['checkout_session'] ) ) {
-			$this->logger->error(
-				'[Flex] Webhook Event missing checkout session',
-				$context,
-			);
-			return new \WP_REST_Response(
-				data: array(
-					'error' => 'Cannot handle webhook of type ' . esc_html( $data['event_type'] ),
-				),
-				status: 422
-			);
+		if ( WebhookEvent::CHECKOUT_SESSION_COMPLETED === $type ) {
+			if ( ! isset( $data['object']['checkout_session'] ) || ! is_array( $data['object']['checkout_session'] ) ) {
+				$error = new FlexException( 'Event missing checkout session' );
+				$this->logger->error( $error->getMessage(), $context );
+				sentry()->captureException( $error );
+				return new \WP_REST_Response(
+					data: array(
+						'error' => 'Event missing checkout session',
+					),
+					status: 422
+				);
+			}
+
+			$received = CheckoutSession::from_flex( $data['object']['checkout_session'] );
+
+			$context['checkout_session_id'] = $received->id();
+
+			$order = $received->wc();
+
+			if ( null === $order ) {
+				$error = new FlexException( 'WooCommerce order does not exist for the given checkout_session_id' );
+				$this->logger->error( $error->getMessage(), $context );
+				sentry()->captureException( $error );
+				return new \WP_REST_Response(
+					data: array(
+						'error' => 'WooCommerce order does not exist for the given checkout_session_id',
+					),
+					status: 422
+				);
+			}
+
+			$context['order_id'] = $order->get_id();
+
+			// If the order has not yet been marked as complete, do so.
+			if ( OrderStatus::PENDING === $order->get_status() ) {
+				$order->payment_complete( $received->id() );
+			}
+
+			$received->apply_to( $order );
+			$order->save();
+		} elseif ( WebhookEvent::REFUND_UPDATED === $type ) {
+			if ( ! isset( $data['object']['refund'] ) || ! is_array( $data['object']['refund'] ) ) {
+				$error = new FlexException( 'Event missing refund' );
+				$this->logger->error( $error->getMessage(), $context );
+				sentry()->captureException( $error );
+				return new \WP_REST_Response(
+					data: array(
+						'error' => 'Event missing refund',
+					),
+					status: 422
+				);
+			}
+
+			$refund = Refund::from_flex( $data['object']['refund'] );
+
+			if ( $refund->status()?->failure() ) {
+				$wc_refund = $refund->wc();
+				if ( null === $wc_refund ) {
+					$error = new FlexException( 'WooCommerce refund does not exist for the given refund_id' );
+					$this->logger->error( $error->getMessage(), $context );
+					sentry()->captureException( $error );
+					return new \WP_REST_Response(
+						data: array(
+							'error' => 'WooCommerce refund does not exist for the given refund_id',
+						),
+						status: 422
+					);
+				}
+
+				$order = wc_get_order( $wc_refund->get_parent_id() );
+
+				if ( false === $order ) {
+					$error = new FlexException( 'WooCommerce order does not exist for the given refund_id' );
+					$this->logger->error( $error->getMessage(), $context );
+					sentry()->captureException( $error );
+					return new \WP_REST_Response(
+						data: array(
+							'error' => 'WooCommerce order does not exist for the given refund_id',
+						),
+						status: 422
+					);
+				}
+
+				$note = sprintf(
+						// translators: %1$d: refund id.
+						// translators: %2$s: amount of the refund.
+						// translators: %3$s: status of the refund.
+						// translators: %4$s: Flex Refund ID.
+					__( 'Refund %1$d in the amount of %2$s resulted in a status of %3$s in Flex (%4$s) and has been deleted.', 'pay-with-flex' ),
+					$wc_refund->get_id(),
+					$wc_refund->get_formatted_refund_amount(),
+					$refund->status()->value,
+					$refund->id(),
+				);
+
+				if ( $wc_refund->delete() ) {
+					$order->add_order_note( $note );
+				}
+			}
 		}
-
-		$received = CheckoutSession::from_flex( $data['object']['checkout_session'] );
-
-		$context['checkout_session_id'] = $received->id();
-
-		$order = $received->wc();
-
-		if ( null === $order ) {
-			$this->logger->error(
-				'[Flex] WooCommerce order does not exist for the given checkout_session_id',
-				$context,
-			);
-			return new \WP_REST_Response(
-				data: array(
-					'error' => 'WooCommerce order does not exist for the given checkout_session_id',
-				),
-				status: 422
-			);
-		}
-
-		$context['order_id'] = $order->get_id();
-
-		// If the order has not yet been marked as complete, do so.
-		if ( OrderStatus::PENDING === $order->get_status() ) {
-			$order->payment_complete( $received->id() );
-		}
-
-		$received->apply_to( $order );
-		$order->save();
 
 		$this->logger->debug(
 			'[Flex] Webhook Handle Complete',

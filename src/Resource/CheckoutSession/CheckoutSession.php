@@ -7,15 +7,17 @@
 
 declare(strict_types=1);
 
-namespace Flex\Resource;
+namespace Flex\Resource\CheckoutSession;
 
 use Flex\Controller\Controller;
 use Flex\Exception\FlexException;
+use Flex\Resource\Resource;
+use Flex\Resource\ResourceAction;
 
 /**
  * Flex Checkout Session
  */
-class CheckoutSession extends Resource implements ResourceInterface {
+class CheckoutSession extends Resource {
 
 	protected const KEY_STATUS       = 'checkout_session_status';
 	protected const KEY_REDIRECT_URL = 'checkout_session_redirect_url';
@@ -33,19 +35,19 @@ class CheckoutSession extends Resource implements ResourceInterface {
 	/**
 	 * Creates a checkout session.
 	 *
-	 * @param string                          $success_url The url to redirect users back too upon success.
-	 * @param ?CustomerDefaults               $defaults The customer defaults.
-	 * @param string                          $redirect_url The url that WooCommerce needs to redirect the user to in order to complete payment.
-	 * @param LineItem[]                      $line_items The line items for the checkout session.
-	 * @param ?string                         $id The id of the checkout session.
-	 * @param ?string                         $client_reference_id The client reference id, which is the WooCommmerce order id.
-	 * @param ?int                            $amount_total The total amount of the checkout session.
-	 * @param ?CheckoutSessionMode            $mode The mode of the checkout session.
-	 * @param ?CheckoutSessionStatus          $status The status of the checkout session.
-	 * @param ?bool                           $test_mode If the checkout session was created in test mode.
-	 * @param ?CheckoutSessionShippingOptions $shipping_options The shipping options if there are any.
-	 * @param ?CheckoutSessionTaxRate         $tax_rate The tax if there is one.
-	 * @param ?string                         $cancel_url The url to use to cancel the checkout session.
+	 * @param string            $success_url The url to redirect users back too upon success.
+	 * @param ?CustomerDefaults $defaults The customer defaults.
+	 * @param string            $redirect_url The url that WooCommerce needs to redirect the user to in order to complete payment.
+	 * @param LineItem[]        $line_items The line items for the checkout session.
+	 * @param ?string           $id The id of the checkout session.
+	 * @param ?string           $client_reference_id The client reference id, which is the WooCommerce order id.
+	 * @param ?int              $amount_total The total amount of the checkout session.
+	 * @param ?Mode             $mode The mode of the checkout session.
+	 * @param ?Status           $status The status of the checkout session.
+	 * @param ?bool             $test_mode If the checkout session was created in test mode.
+	 * @param ?ShippingOptions  $shipping_options The shipping options if there are any.
+	 * @param ?TaxRate          $tax_rate The tax if there is one.
+	 * @param ?string           $cancel_url The url to use to cancel the checkout session.
 	 */
 	public function __construct(
 		protected string $success_url,
@@ -55,11 +57,11 @@ class CheckoutSession extends Resource implements ResourceInterface {
 		protected ?string $id = null,
 		protected ?string $client_reference_id = null,
 		protected ?int $amount_total = null,
-		protected ?CheckoutSessionMode $mode = CheckoutSessionMode::PAYMENT,
-		protected ?CheckoutSessionStatus $status = null,
+		protected ?Mode $mode = Mode::PAYMENT,
+		protected ?Status $status = null,
 		protected ?bool $test_mode = null,
-		protected ?CheckoutSessionShippingOptions $shipping_options = null,
-		protected ?CheckoutSessionTaxRate $tax_rate = null,
+		protected ?ShippingOptions $shipping_options = null,
+		protected ?TaxRate $tax_rate = null,
 		protected ?string $cancel_url = null,
 	) {}
 
@@ -73,7 +75,7 @@ class CheckoutSession extends Resource implements ResourceInterface {
 	/**
 	 * Status of the checkout session.
 	 */
-	public function status(): ?CheckoutSessionStatus {
+	public function status(): ?Status {
 		return $this->status;
 	}
 
@@ -139,7 +141,7 @@ class CheckoutSession extends Resource implements ResourceInterface {
 			action: 'wp_rest',
 		);
 
-		$tax_rate = CheckoutSessionTaxRate::from_wc( $order );
+		$tax_rate = TaxRate::from_wc( $order );
 
 		$checkout_session = new self(
 			success_url: $success_url,
@@ -147,12 +149,12 @@ class CheckoutSession extends Resource implements ResourceInterface {
 			redirect_url: $order->meta_exists( self::META_PREFIX . self::KEY_REDIRECT_URL ) ? $order->get_meta( self::META_PREFIX . self::KEY_REDIRECT_URL ) : null,
 			id: $id ? $id : null,
 			client_reference_id: (string) $order->get_id(),
-			status: CheckoutSessionStatus::tryFrom( $order->get_meta( self::META_PREFIX . self::KEY_STATUS ) ),
-			mode: CheckoutSessionMode::PAYMENT,
+			status: Status::tryFrom( $order->get_meta( self::META_PREFIX . self::KEY_STATUS ) ),
+			mode: Mode::PAYMENT,
 			line_items: array_map( fn( $item ) => LineItem::from_wc( $item ), array_values( $order->get_items() ) ),
 			amount_total: self::currency_to_unit_amount( $order->get_total() ),
 			test_mode: $order->meta_exists( self::META_PREFIX . self::KEY_TEST_MODE ) ? wc_string_to_bool( $order->get_meta( self::META_PREFIX . self::KEY_TEST_MODE ) ) : self::payment_gateway()->is_in_test_mode(),
-			shipping_options: ! empty( $order->get_shipping_methods() ) ? CheckoutSessionShippingOptions::from_wc( $order ) : null,
+			shipping_options: ! empty( $order->get_shipping_methods() ) ? ShippingOptions::from_wc( $order ) : null,
 			tax_rate: $tax_rate->amount() > 0 ? $tax_rate : null,
 			cancel_url: wc_get_checkout_url(),
 		);
@@ -272,11 +274,11 @@ class CheckoutSession extends Resource implements ResourceInterface {
 		$this->redirect_url        = $checkout_session['redirect_url'] ?? $this->redirect_url;
 		$this->client_reference_id = $checkout_session['client_reference_id'] ?? $this->client_reference_id;
 		$this->amount_total        = $checkout_session['amount_total'] ?? $this->amount_total;
-		$this->mode                = CheckoutSessionMode::tryFrom( $checkout_session['mode'] ?? '' ) ?? $this->mode;
-		$this->status              = CheckoutSessionStatus::tryFrom( $checkout_session['status'] ?? '' ) ?? $this->status;
+		$this->mode                = Mode::tryFrom( $checkout_session['mode'] ?? '' ) ?? $this->mode;
+		$this->status              = Status::tryFrom( $checkout_session['status'] ?? '' ) ?? $this->status;
 		$this->test_mode           = $checkout_session['test_mode'] ?? $this->test_mode;
-		$this->shipping_options    = isset( $checkout_session['shipping_options'] ) ? CheckoutSessionShippingOptions::from_flex( $checkout_session['shipping_options'] ) : $this->shipping_options;
-		$this->tax_rate            = isset( $checkout_session['tax_rate'] ) ? CheckoutSessionTaxRate::from_flex( $checkout_session['tax_rate'] ) : $this->tax_rate;
+		$this->shipping_options    = isset( $checkout_session['shipping_options'] ) ? ShippingOptions::from_flex( $checkout_session['shipping_options'] ) : $this->shipping_options;
+		$this->tax_rate            = isset( $checkout_session['tax_rate'] ) ? TaxRate::from_flex( $checkout_session['tax_rate'] ) : $this->tax_rate;
 		$this->cancel_url          = $checkout_session['cancel_url'] ?? $this->cancel_url;
 	}
 

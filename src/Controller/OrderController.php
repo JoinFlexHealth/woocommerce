@@ -10,8 +10,8 @@ declare(strict_types=1);
 namespace Flex\Controller;
 
 use Automattic\WooCommerce\Enums\OrderStatus;
-use Flex\Resource\CheckoutSession;
-use Flex\Resource\CheckoutSessionStatus;
+use Flex\Resource\CheckoutSession\CheckoutSession;
+use Flex\Resource\CheckoutSession\Status as CheckoutSessionStatus;
 use Flex\Resource\ResourceAction;
 
 /**

@@ -3,7 +3,7 @@ Contributors: withflex, davidbarratt
 Tags: hsa, fsa, payments, woocommerce
 Requires at least: 6.8
 Tested up to: 6.8
-Stable tag: 2.3.0
+Stable tag: 3.0.0
 Requires PHP: 8.1
 License: GPLv3 or later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -55,7 +55,8 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 
 == Changelog ==
 
-= 2.3.0 =
+= 3.0.0 =
+* Added support fro processing refunds from within WooCommerce.
 * Added the `FLEX_TELEMETRY` constant which allows users to opt-out of telemetry by setting the constant to `false`.
 * Fixed `PHP Notice: Function _load_textdomain_just_in_time was called incorrectly.`
 

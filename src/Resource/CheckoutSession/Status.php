@@ -7,9 +7,9 @@
 
 declare(strict_types=1);
 
-namespace Flex\Resource;
+namespace Flex\Resource\CheckoutSession;
 
-enum CheckoutSessionStatus: string {
+enum Status: string {
 	case OPEN     = 'open';
 	case COMPLETE = 'complete';
 }

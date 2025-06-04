@@ -23,7 +23,13 @@ class Webhook extends Resource {
 	protected const KEY_URL            = 'webhoook_url';
 	protected const KEY_HASH           = 'webhoook_hash';
 	protected const KEY_SIGNING_SECRET = 'webhoook_signing_secret';
-	protected const EVENTS             = array( 'checkout.session.completed' );
+
+	/**
+	 * Events
+	 *
+	 * @var WebhookEvent[]
+	 */
+	protected $events;
 
 	/**
 	 * WooCommerce Flex Gateway
@@ -33,21 +39,32 @@ class Webhook extends Resource {
 	protected ?PaymentGateway $wc = null;
 
 	/**
-	 * Creates a checkout session line item
+	 * Creates a webhook.
 	 *
-	 * @param string   $url The url the webhooks should subscribe too.
-	 * @param ?string  $id The id of the webhook.
-	 * @param ?string  $signing_secret The signing secret of the webhook.
-	 * @param string[] $events The events the webhook is subscribed too.
-	 * @param ?bool    $test_mode Whether the webhook was created in test mode.
+	 * @param string          $url The url the webhooks should subscribe too.
+	 * @param ?string         $id The id of the webhook.
+	 * @param ?string         $signing_secret The signing secret of the webhook.
+	 * @param ?WebhookEvent[] $events The events the webhook is subscribed too.
+	 * @param ?bool           $test_mode Whether the webhook was created in test mode.
+	 * @throws \LogicException If $events does not consist of instances of `WebhookEvent`.
 	 */
 	public function __construct(
 		protected string $url,
 		protected ?string $id = null,
 		protected ?string $signing_secret = null,
-		protected array $events = self::EVENTS,
+		?array $events = null,
 		protected ?bool $test_mode = null,
-	) {}
+	) {
+		if ( null !== $events && ! array_all( $events, fn ( $e ) => $e instanceof WebhookEvent ) ) {
+			throw new \LogicException( 'Webhook::$events must only contain instances of WebhookEvent' );
+		}
+
+		if ( null === $events ) {
+			$events = WebhookEvent::cases();
+		}
+
+		$this->events = $events;
+	}
 
 	/**
 	 * {@inheritdoc}
@@ -113,9 +130,22 @@ class Webhook extends Resource {
 	protected function extract( array $webhook ) {
 		$this->id             = $webhook['webhook_id'] ?? $this->id;
 		$this->url            = $webhook['url'] ?? $this->url;
-		$this->events         = $webhook['events'] ?? $this->events;
 		$this->signing_secret = $webhook['signing_secret'] ?? $this->signing_secret;
 		$this->test_mode      = $webhook['test_mode'] ?? $this->test_mode;
+
+		if ( ! empty( $webhook['events'] ) && is_array( $webhook['events'] ) ) {
+			$this->events = array_reduce(
+				$webhook['events'],
+				function ( array $acc, string $value ): array {
+					$event = WebhookEvent::tryFrom( $value );
+					if ( null !== $event ) {
+						$acc[] = $event;
+					}
+					return $acc;
+				},
+				array(),
+			);
+		}
 	}
 
 	/**

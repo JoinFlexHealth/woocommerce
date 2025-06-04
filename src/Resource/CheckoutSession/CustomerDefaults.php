@@ -7,14 +7,15 @@
 
 declare(strict_types=1);
 
-namespace Flex\Resource;
+namespace Flex\Resource\CheckoutSession;
 
 use Flex\FlexException;
+use Flex\Resource\Resource;
 
 /**
  * Flex Customer Defaults
  */
-class CustomerDefaults extends Resource implements ResourceInterface {
+class CustomerDefaults extends Resource {
 
 	/**
 	 * WooCommerce Order
