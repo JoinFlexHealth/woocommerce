@@ -11,6 +11,7 @@ namespace Flex\Resource\CheckoutSession;
 
 use Flex\Controller\Controller;
 use Flex\Exception\FlexException;
+use Flex\Resource\Coupon;
 use Flex\Resource\Resource;
 use Flex\Resource\ResourceAction;
 
@@ -33,6 +34,20 @@ class CheckoutSession extends Resource {
 	protected ?\WC_Order $wc = null;
 
 	/**
+	 * Line Items
+	 *
+	 * @var LineItem[]
+	 */
+	protected array $line_items;
+
+	/**
+	 * Discounts
+	 *
+	 * @var Discount[]
+	 */
+	protected array $discounts;
+
+	/**
 	 * Creates a checkout session.
 	 *
 	 * @param string            $success_url The url to redirect users back too upon success.
@@ -48,12 +63,14 @@ class CheckoutSession extends Resource {
 	 * @param ?ShippingOptions  $shipping_options The shipping options if there are any.
 	 * @param ?TaxRate          $tax_rate The tax if there is one.
 	 * @param ?string           $cancel_url The url to use to cancel the checkout session.
+	 * @param ?Discount[]       $discounts The discounts to apply to the checkout session.
+	 * @throws \LogicException If the line_items or discounts contain something other than their respective types.
 	 */
 	public function __construct(
 		protected string $success_url,
 		protected ?CustomerDefaults $defaults = null,
 		protected ?string $redirect_url = null,
-		protected array $line_items = array(),
+		array $line_items = array(),
 		protected ?string $id = null,
 		protected ?string $client_reference_id = null,
 		protected ?int $amount_total = null,
@@ -63,7 +80,19 @@ class CheckoutSession extends Resource {
 		protected ?ShippingOptions $shipping_options = null,
 		protected ?TaxRate $tax_rate = null,
 		protected ?string $cancel_url = null,
-	) {}
+		?array $discounts = null,
+	) {
+		if ( ! array_all( $line_items, fn ( $item ) => $item instanceof LineItem ) ) {
+			throw new \LogicException( 'CheckoutSession::$line_items may only contain instances of LineItem' );
+		}
+		$this->line_items = $line_items;
+
+		if ( ! empty( $discounts ) && ! array_all( $discounts, fn ( $item ) => $item instanceof Discount ) ) {
+			throw new \LogicException( 'CheckoutSession::$discounts may only contain instances of Discount' );
+		}
+
+		$this->discounts = $discounts ?? array();
+	}
 
 	/**
 	 * {@inheritdoc}
@@ -123,6 +152,10 @@ class CheckoutSession extends Resource {
 			$data['tax_rate'] = $this->tax_rate;
 		}
 
+		if ( ! empty( $this->discounts ) ) {
+			$data['discounts'] = $this->discounts;
+		}
+
 		return $data;
 	}
 
@@ -143,6 +176,36 @@ class CheckoutSession extends Resource {
 
 		$tax_rate = TaxRate::from_wc( $order );
 
+		// Recreate the discounts so we can get a line-item level discount.
+		$wc_discounts = new \WC_Discounts( $order );
+		foreach ( $order->get_coupons() as $applied ) {
+			// We do *not* verify the coupons because they have already been verified when they were placed on the order.
+			// Applying the coupons again _should_ be deterministic.
+			$wc_discounts->apply_coupon( new \WC_Coupon( $applied->get_code() ), false );
+		}
+
+		// Group the discounts by the code → amount → line item
+		// If the discount is spread evenly across line items, we can share the discount in Flex.
+		$discounts_grouped = array();
+		foreach ( $wc_discounts->get_discounts() as $code => $items ) {
+			foreach ( $items as $item_id => $amount ) {
+				$discounts_grouped[ $code ][ self::currency_to_unit_amount( $amount ) ][] = $item_id;
+			}
+		}
+
+		$discounts = array();
+		foreach ( $discounts_grouped as $code => $group ) {
+			foreach ( $group as $per_item_amount => $item_ids ) {
+				$discounts[] = new Discount(
+					new Coupon(
+						name: $code,
+						amount_off: $per_item_amount * count( $item_ids ),
+						applies_to: array_map( fn( $item_id ) => LineItem::from_wc( $order->get_item( $item_id ) )->price(), $item_ids ),
+					)
+				);
+			}
+		}
+
 		$checkout_session = new self(
 			success_url: $success_url,
 			defaults: CustomerDefaults::from_wc( $order ),
@@ -157,6 +220,7 @@ class CheckoutSession extends Resource {
 			shipping_options: ! empty( $order->get_shipping_methods() ) ? ShippingOptions::from_wc( $order ) : null,
 			tax_rate: $tax_rate->amount() > 0 ? $tax_rate : null,
 			cancel_url: wc_get_checkout_url(),
+			discounts: $discounts,
 		);
 
 		$checkout_session->wc = $order;

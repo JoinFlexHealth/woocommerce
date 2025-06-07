@@ -55,6 +55,13 @@ class LineItem extends Resource {
 	}
 
 	/**
+	 * Returns the quantity associated with the line item.
+	 */
+	public function quantity(): int {
+		return $this->quantity;
+	}
+
+	/**
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
