@@ -57,6 +57,7 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 
 = 3.1.0 =
 * Added support for Coupons.
+* Fixed a bug that prevented product sync when the payment method was enabled for the very first time.
 
 = 3.0.0 =
 * Added support for processing refunds from within WooCommerce.

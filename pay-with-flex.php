@@ -601,6 +601,75 @@ function flex_update_webhook_async( int $retries = 0 ): void {
 }
 
 /**
+ * React to the payment method being enabled.
+ */
+function payment_method_enabled(): void {
+	sentry()->captureMessage(
+		message: 'Payment method enabled',
+		level: Severity::info(),
+	);
+
+	$gateway = payment_gateway();
+
+	// Refresh the settings from the database so we are working with the latest version.
+	$gateway->init_settings();
+
+		// If no API key is present, then there is nothing to do.
+	if ( empty( $gateway->api_key() ) ) {
+		return;
+	}
+
+	// Check to see if the webhook needs to be updated.
+	$webhook = Webhook::from_wc( $gateway );
+	if ( $webhook->can( $webhook->needs() ) ) {
+		flex_update_webhook_async();
+	}
+
+	for ( $i = 1; ; $i++ ) {
+		/**
+		 * Fetch all of the products we support.
+		 *
+		 * @var \WC_Product[]
+		 */
+		$products = wc_get_products(
+			array(
+				'paged' => $i,
+				'type'  => array_merge( Product::WC_TYPES, Price::WC_TYPES ),
+			)
+		);
+
+		if ( empty( $products ) ) {
+			break;
+		}
+
+		// Enqueue all of them to be updated.
+		foreach ( $products as $product ) {
+			wc_update_product( $product->get_id(), $product );
+		}
+	}
+}
+
+/**
+ * React to the payment method being disabled.
+ */
+function payment_method_disabled(): void {
+	sentry()->captureMessage(
+		message: 'Payment method disabled',
+		level: Severity::warning(),
+	);
+	$gateway = payment_gateway();
+
+	// Refresh the settings from the database so we are working with the latest version.
+	$gateway->init_settings();
+
+	// Check to see if the webhook needs to be updated.
+	$webhook = Webhook::from_wc( $gateway );
+	if ( $webhook->can( $webhook->needs() ) ) {
+		flex_update_webhook_async();
+	}
+}
+
+/**
  * Listen to settings changes for Flex gateway.
  *
  * @param mixed $old_value The previous value.
@@ -615,67 +684,40 @@ function update_option_wc_flex_settings( mixed $old_value, mixed $value ): void 
 		return;
 	}
 
-	$gateway = payment_gateway();
-
-	// Refresh the settings from the database so we are working with the latest version.
-	$gateway->init_settings();
-
-	// Payment method activation.
 	if ( 'yes' === $value['enabled'] && ( null === $old_value || ! isset( $old_value['enabled'] ) || 'no' === $old_value['enabled'] ) ) {
-		sentry()->captureMessage(
-			message: 'Payment method enabled',
-			level: Severity::info(),
-		);
-
-		// If no API key is present, then there is nothing to do.
-		if ( empty( $gateway->api_key() ) ) {
-			return;
-		}
-
-		// Check to see if the webhook needs to be updated.
-		$webhook = Webhook::from_wc( $gateway );
-		if ( $webhook->can( $webhook->needs() ) ) {
-			flex_update_webhook_async();
-		}
-
-		for ( $i = 1; ; $i++ ) {
-			/**
-			 * Fetch all of the products we support.
-			 *
-			 * @var \WC_Product[]
-			 */
-			$products = wc_get_products(
-				array(
-					'paged' => $i,
-					'type'  => array_merge( Product::WC_TYPES, Price::WC_TYPES ),
-				)
-			);
-
-			if ( empty( $products ) ) {
-				break;
-			}
-
-			// Enqueue all of them to be updated.
-			foreach ( $products as $product ) {
-				wc_update_product( $product->get_id(), $product );
-			}
-		}
-	} elseif ( 'no' === $value['enabled'] && 'yes' === $old_value['enabled'] ) { // Payment method deactivation.
-		sentry()->captureMessage(
-			message: 'Payment method disabled',
-			level: Severity::warning(),
-		);
-
-		// Check to see if the webhook needs to be updated.
-		$webhook = Webhook::from_wc( $gateway );
-		if ( $webhook->can( $webhook->needs() ) ) {
-			flex_update_webhook_async();
-		}
+		payment_method_enabled();
+	} elseif ( 'no' === $value['enabled'] && 'yes' === $old_value['enabled'] ) {
+		payment_method_disabled();
 	}
 }
 add_action(
 	hook_name: 'update_option_woocommerce_flex_settings',
 	callback: __NAMESPACE__ . '\update_option_wc_flex_settings',
+	accepted_args: 2,
+);
+
+/**
+ * Adding the WooCommerce option for the first time.
+ *
+ * @param string $option The name of the option.
+ * @param mixed  $value The value of the option.
+ */
+function add_option_wc_flex_settings( string $option, mixed $value ): void {
+	if ( ! is_array( $value ) ) {
+		return;
+	}
+
+	if ( ! isset( $value['enabled'] ) ) {
+		return;
+	}
+
+	if ( 'yes' === $value['enabled'] ) {
+		payment_method_enabled();
+	}
+}
+add_action(
+	hook_name: 'add_option_woocommerce_flex_settings',
+	callback: __NAMESPACE__ . '\add_option_wc_flex_settings',
 	accepted_args: 2,
 );
 
