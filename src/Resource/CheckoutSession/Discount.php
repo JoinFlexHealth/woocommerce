@@ -11,6 +11,7 @@ namespace Flex\Resource\CheckoutSession;
 
 use Flex\Resource\Resource;
 use Flex\Resource\Coupon;
+use Flex\Resource\ResourceAction;
 
 /**
  * Flex Checkout Session Discount
@@ -52,5 +53,41 @@ class Discount extends Resource {
 		}
 
 		return null;
+	}
+
+	/**
+	 * {@inheritdoc}
+	 */
+	public function needs(): ResourceAction {
+		if ( ResourceAction::NONE !== $this->item->needs() ) {
+			return ResourceAction::DEPENDENCY;
+		}
+
+		return ResourceAction::NONE;
+	}
+
+	/**
+	 * {@inheritdoc}
+	 *
+	 * @param ResourceAction $action The action to check.
+	 */
+	public function can( ResourceAction $action ): bool {
+		return match ( $action ) {
+			ResourceAction::DEPENDENCY => true,
+			default => false,
+		};
+	}
+
+	/**
+	 * Handles the dependency actions if any.
+	 *
+	 * @param ResourceAction $action The action to perform.
+	 */
+	public function exec( ResourceAction $action ): void {
+		if ( ! $this->can( $action ) ) {
+			return;
+		}
+
+		$this->item->exec( $this->item->needs() );
 	}
 }

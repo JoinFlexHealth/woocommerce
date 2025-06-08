@@ -196,13 +196,42 @@ class CheckoutSession extends Resource {
 		$discounts = array();
 		foreach ( $discounts_grouped as $code => $group ) {
 			foreach ( $group as $per_item_amount => $item_ids ) {
+				$amount_off = $per_item_amount * count( $item_ids );
+				if ( empty( $amount_off ) ) {
+					continue;
+				}
+
 				$discounts[] = new Discount(
 					new Coupon(
 						name: $code,
-						amount_off: $per_item_amount * count( $item_ids ),
+						amount_off: $amount_off,
 						applies_to: array_map( fn( $item_id ) => LineItem::from_wc( $order->get_item( $item_id ) )->price(), $item_ids ),
 					)
 				);
+			}
+		}
+
+		// Add the sale price discounts.
+		foreach ( $order->get_items() as $item ) {
+			if ( ! $item instanceof \WC_Order_Item_Product ) {
+				continue;
+			}
+
+			$product = $item->get_product();
+			if ( $product->get_price() !== $product->get_sale_price() ) {
+				continue;
+			}
+
+			$coupon = Coupon::from_wc( $product );
+			if ( empty( $coupon->amount_off() ) ) {
+				continue;
+			}
+
+			$quantity = $item->get_quantity();
+
+			// Add a discount for each individiaul item.
+			for ( $i = 0; $i < $quantity; $i++ ) {
+				$discounts[] = new Discount( $coupon );
 			}
 		}
 
@@ -288,7 +317,11 @@ class CheckoutSession extends Resource {
 	 */
 	public function needs(): ResourceAction {
 		// Handle any dependency actions first.
-		if ( array_any( $this->line_items, fn( $line_item ) => $line_item->needs() !== ResourceAction::NONE ) ) {
+		if ( array_any( $this->line_items, static fn( $line_item ) => $line_item->needs() !== ResourceAction::NONE ) ) {
+			return ResourceAction::DEPENDENCY;
+		}
+
+		if ( array_any( $this->discounts, static fn( $discount ) => $discount->needs() !== ResourceAction::NONE ) ) {
 			return ResourceAction::DEPENDENCY;
 		}
 
@@ -376,20 +409,28 @@ class CheckoutSession extends Resource {
 			foreach ( $this->line_items as $line_item ) {
 				$line_item->exec( $line_item->needs() );
 			}
+
+			foreach ( $this->discounts as $discount ) {
+				$discount->exec( $discount->needs() );
+			}
+
+			// Re-evaluate the action.
+			$this->exec( $this->needs() );
+			return;
 		}
 
 		$data = $this->remote_request(
 			match ( $action ) {
-				ResourceAction::CREATE, ResourceAction::DEPENDENCY => '/v1/checkout/sessions',
+				ResourceAction::CREATE => '/v1/checkout/sessions',
 				ResourceAction::REFRESH => '/v1/checkout/sessions/' . $this->id,
 			},
 			array(
 				'method' => match ( $action ) {
-					ResourceAction::CREATE, ResourceAction::DEPENDENCY => 'POST',
+					ResourceAction::CREATE => 'POST',
 					ResourceAction::REFRESH => 'GET',
 				},
 				'flex'   => match ( $action ) {
-					ResourceAction::CREATE, ResourceAction::DEPENDENCY => array( 'data' => array( 'checkout_session' => $this ) ),
+					ResourceAction::CREATE => array( 'data' => array( 'checkout_session' => $this ) ),
 					ResourceAction::REFRESH => array(),
 				},
 			),

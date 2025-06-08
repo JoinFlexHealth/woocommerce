@@ -24,6 +24,7 @@ use Flex\Controller\WebhookController;
 use Flex\Exception\FlexException;
 use Flex\PaymentGateway;
 use Flex\Resource\CheckoutSession\LineItem;
+use Flex\Resource\Coupon;
 use Flex\Resource\Price;
 use Flex\Resource\Product;
 use Flex\Resource\Webhook;
@@ -344,6 +345,23 @@ function flex_update_price_async( int $product_id, int $retries = 0 ): void {
 }
 
 /**
+ * Update Coupon in Flex.
+ *
+ * @param int $product_id The id of the product.
+ * @param int $retries The number of retries that have been attempted.
+ *
+ * @throws \Exception If the product fails to be updated.
+ */
+function flex_update_coupon_async( int $product_id, int $retries = 0 ): void {
+	flex_enqueue_async_action(
+		hook: 'flex_update_coupon',
+		args: array( $product_id, $retries ),
+		group: "product-$product_id",
+		retries: $retries,
+	);
+}
+
+/**
  * Update Product in Flex.
  *
  * @param int $product_id The id of the product.
@@ -365,15 +383,7 @@ function flex_update_product( int $product_id, int $retries = 0 ): void {
 		}
 
 		$flex_product = Product::from_wc( $product );
-
-		$action = $flex_product->needs();
-
-		// It's possible that the product no longer needs updating (i.e. if the changes have been reverted).
-		if ( ! $flex_product->can( $action ) ) {
-			return;
-		}
-
-		$flex_product->exec( $action );
+		$flex_product->exec( $flex_product->needs() );
 	} catch ( \Throwable $previous ) {
 		flex_update_product_async( $product_id, $retries + 1 );
 		throw $previous;
@@ -407,15 +417,7 @@ function flex_update_price( int $product_id, int $retries = 0 ): void {
 		}
 
 		$price = Price::from_wc( $product );
-
-		$action = $price->needs();
-
-		// It's possible that the price no longer needs updating (i.e. if the changes have been reverted).
-		if ( ! $price->can( $action ) ) {
-			return;
-		}
-
-		$price->exec( $action );
+		$price->exec( $price->needs() );
 	} catch ( \Throwable $previous ) {
 		flex_update_price_async( $product_id, $retries + 1 );
 		throw $previous;
@@ -424,6 +426,40 @@ function flex_update_price( int $product_id, int $retries = 0 ): void {
 add_action(
 	hook_name: 'flex_update_price',
 	callback: __NAMESPACE__ . '\flex_update_price',
+	accepted_args: 2,
+);
+
+/**
+ * Update Coupon in Flex.
+ *
+ * @param int $product_id The id of the coupon.
+ * @param int $retries The number of retries that have been attempted.
+ *
+ * @throws FlexException If the API key is not set.
+ * @throws \Throwable Any caught exceptions.
+ */
+function flex_update_coupon( int $product_id, int $retries = 0 ): void {
+	try {
+		$gateway = payment_gateway();
+		if ( empty( $gateway->api_key() ) ) {
+			throw new FlexException( 'API Key is not set' );
+		}
+
+		$product = wc_get_product( $product_id );
+		if ( ! $product ) {
+			return;
+		}
+
+		$coupon = Coupon::from_wc( $product );
+		$coupon->exec( $coupon->needs() );
+	} catch ( \Throwable $previous ) {
+		flex_update_coupon_async( $product_id, $retries + 1 );
+		throw $previous;
+	}
+}
+add_action(
+	hook_name: 'flex_update_coupon',
+	callback: __NAMESPACE__ . '\flex_update_coupon',
 	accepted_args: 2,
 );
 
@@ -453,13 +489,26 @@ function wc_update_product( int $product_id, \WC_Product $product ): void {
 		return;
 	}
 
+	$coupon = Coupon::from_wc( $product );
+	if ( $coupon->can( $coupon->needs() ) ) {
+		flex_update_coupon_async( $product_id );
+		return;
+	}
+
 	$variation_ids = $product->get_children();
 	foreach ( $variation_ids as $variation_id ) {
 		$variation = wc_get_product( $variation_id );
-		$price     = Price::from_wc( $variation );
 
+		$price = Price::from_wc( $variation );
 		if ( $price->can( $price->needs() ) ) {
 			flex_update_price_async( $variation_id );
+			continue;
+		}
+
+		$coupon = Coupon::from_wc( $variation );
+		if ( $coupon->can( $coupon->needs() ) ) {
+			flex_update_coupon_async( $variation_id );
+			continue;
 		}
 	}
 }
@@ -490,10 +539,15 @@ function wc_update_product_variation( int $product_id, \WC_Product $product ): v
 
 	$price = Price::from_wc( $product );
 	if ( $price->can( $price->needs() ) ) {
+		flex_update_price_async( $product_id );
 		return;
 	}
 
-	flex_update_price_async( $product_id );
+	$coupon = Coupon::from_wc( $product );
+	if ( $coupon->can( $coupon->needs() ) ) {
+		flex_update_coupon_async( $product_id );
+		return;
+	}
 }
 add_action(
 	hook_name: 'woocommerce_update_product_variation',

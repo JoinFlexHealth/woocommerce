@@ -259,10 +259,8 @@ class Price extends Resource implements ResourceInterface {
 			$this->product->exec( $this->product->needs() );
 
 			// Revaluate the action that is needed.
-			$action = $this->needs();
-			if ( ResourceAction::DEPENDENCY === $action || false === $this->can( $action ) ) {
-				return;
-			}
+			$this->exec( $this->needs() );
+			return;
 		}
 
 		// If the Price is being re-created, deactivate the existing one.
