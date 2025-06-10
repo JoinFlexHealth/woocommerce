@@ -57,6 +57,7 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 
 = 3.1.1 =
 * Changed the Product descriptions in Flex by removing the HTML before saving them.
+* Changed the Price descriptions in Flex by removing the HTML before saving them.
 
 = 3.1.0 =
 * Added support for [Coupons](https://woocommerce.com/document/coupon-management/).

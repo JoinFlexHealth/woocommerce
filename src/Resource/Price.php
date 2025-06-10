@@ -94,7 +94,13 @@ class Price extends Resource implements ResourceInterface {
 
 		$price = $product->get_regular_price();
 
-		$description = $product->get_short_description();
+		/**
+		 * Product Description.
+		 *
+		 * @see https://github.com/woocommerce/woocommerce/blob/9.3.3/plugins/woocommerce/includes/class-wc-structured-data.php#L203
+		 */
+		$short_description = $product->get_short_description();
+		$description       = trim( wp_strip_all_tags( do_shortcode( $short_description ? $short_description : $product->get_description() ) ) );
 		if ( ! $description && ProductType::VARIATION === $product->get_type() ) {
 			$description = wc_get_formatted_variation( $product, true );
 		}
