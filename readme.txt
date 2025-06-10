@@ -56,6 +56,7 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 == Changelog ==
 
 = 3.1.1 =
+* Fixed a bug that would cause the [WooCommerce Stripe Payment Gateway](https://wordpress.org/plugins/woocommerce-gateway-stripe/) to crash.
 * Changed the Product descriptions in Flex by removing the HTML before saving them.
 * Changed the Price descriptions in Flex by removing the HTML before saving them.
 

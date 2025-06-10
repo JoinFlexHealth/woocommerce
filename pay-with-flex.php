@@ -47,10 +47,16 @@ require_once plugin_dir_path( __FILE__ ) . '/vendor/autoload_packages.php';
 const PLUGIN_FILE = __FILE__;
 
 /**
- * Flex Payment Gateway
+ * Flex Payment Gateway.
+ *
+ * If WooCommerce has initialized the payment gateways, return that instance, if not, return a new instance.
  */
 function payment_gateway(): PaymentGateway {
-	return WC()->payment_gateways()->payment_gateways()['flex'] ?? new PaymentGateway( actions: false );
+	if ( did_action( 'wc_payment_gateways_initialized' ) ) {
+		return WC()->payment_gateways()->payment_gateways()['flex'];
+	}
+
+	return new PaymentGateway( actions: false );
 }
 
 /**
@@ -125,9 +131,8 @@ function sentry(): HubInterface {
 
 				$scope->setTags(
 					array(
-						'site'           => get_bloginfo( 'name' ),
-						'site.url'       => home_url(),
-						'flex.test_mode' => wc_bool_to_string( payment_gateway()->is_in_test_mode() ),
+						'site'     => get_bloginfo( 'name' ),
+						'site.url' => home_url(),
 					),
 				);
 
@@ -210,7 +215,7 @@ function sentry(): HubInterface {
 						/**
 						 * Add the OS information
 						 *
-						 * @see {@link https://github.com/getsentry/sentry-php/blob/master/src/Integration/EnvironmentIntegration.php#L55-L82}
+						 * @see https://github.com/getsentry/sentry-php/blob/4.11.1/src/Integration/EnvironmentIntegration.php#L55-L82
 						 */
 						if ( null === $event->getOsContext() && \function_exists( 'php_uname' ) ) {
 							$event->setOsContext(
@@ -235,17 +240,24 @@ function sentry(): HubInterface {
 }
 
 /**
- * Plugins Loaded hook.
+ * Add payment gateway tags.
  *
- * Performs actions after all of the plugins have loaded.
+ * @param \WC_Payment_Gateways $gateways The payment gateways that were initialzed by WooCommerce.
  */
-function plugins_loaded() {
-	// Setup Sentry.
-	sentry();
+function payment_gateways_initialized( \WC_Payment_Gateways $gateways ) {
+	$flex = $gateways->payment_gateways()['flex'] ?? null;
+
+	if ( ! $flex ) {
+		return;
+	}
+
+	sentry()->configureScope(
+		fn ( $scope ) => $scope->setTag( 'flex.test_mode', wc_bool_to_string( $flex->is_in_test_mode() ) )
+	);
 }
 add_action(
-	hook_name: 'plugins_loaded',
-	callback: __NAMESPACE__ . '\plugins_loaded',
+	hook_name: 'wc_payment_gateways_initialized',
+	callback: __NAMESPACE__ . '\payment_gateways_initialized'
 );
 
 /**
