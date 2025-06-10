@@ -137,8 +137,14 @@ class Product extends Resource implements ResourceInterface {
 	 */
 	public static function from_wc( \WC_Product $product ): self {
 		$meta_prefix = self::meta_prefix();
-		$description = trim( $product->get_short_description() );
-		$url         = get_permalink( $product->get_id() );
+		/**
+		 * Product Description.
+		 *
+		 * @see https://github.com/woocommerce/woocommerce/blob/9.3.3/plugins/woocommerce/includes/class-wc-structured-data.php#L203
+		 */
+		$short_description = $product->get_short_description();
+		$description       = trim( wp_strip_all_tags( do_shortcode( $short_description ? $short_description : $product->get_description() ) ) );
+		$url               = get_permalink( $product->get_id() );
 
 		$gtin = self::wc_gtin( $product );
 

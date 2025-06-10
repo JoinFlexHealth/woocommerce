@@ -2,7 +2,7 @@
 /**
  * Plugin Name:      Flex HSA/FSA Payments
  * Description:      Accept HSA/FSA payments directly in the checkout flow.
- * Version:          3.1.0
+ * Version:          3.1.1
  * Plugin URI:       https://wordpress.org/plugins/pay-with-flex/
  * Author:           Flex
  * Author URI:       https://withflex.com/
@@ -136,7 +136,7 @@ function sentry(): HubInterface {
 						/**
 						 * Add the request information.
 						 *
-						 * @see {@link https://github.com/getsentry/sentry-php/blob/4.11.1/src/Integration/RequestIntegration.php#L120-L166}
+						 * @see https://github.com/getsentry/sentry-php/blob/4.11.1/src/Integration/RequestIntegration.php#L120-L166
 						 */
 						if ( empty( $event->getRequest() ) ) {
 							$request = ( new RequestFetcher() )->fetchRequest();
@@ -170,7 +170,7 @@ function sentry(): HubInterface {
 						/**
 						 * Add the module information.
 						 *
-						 * @see {@link https://github.com/getsentry/sentry-php/blob/master/src/Integration/ModulesIntegration.php#L36}
+						 * @see https://github.com/getsentry/sentry-php/blob/4.11.1/src/Integration/ModulesIntegration.php#L36
 						 */
 						if ( empty( $event->getModules() ) ) {
 
@@ -195,7 +195,7 @@ function sentry(): HubInterface {
 						/**
 						 * Add the runtime information.
 						 *
-						 * @see {@link https://github.com/getsentry/sentry-php/blob/master/src/Integration/EnvironmentIntegration.php#L38-L53}
+						 * @see https://github.com/getsentry/sentry-php/blob/4.11.1/src/Integration/EnvironmentIntegration.php#L38-L53
 						 */
 						if ( null === $event->getRuntimeContext() ) {
 							$event->setRuntimeContext(
