@@ -2,7 +2,7 @@
 /**
  * Plugin Name:      Flex HSA/FSA Payments
  * Description:      Accept HSA/FSA payments directly in the checkout flow.
- * Version:          3.1.1
+ * Version:          3.1.2
  * Plugin URI:       https://wordpress.org/plugins/pay-with-flex/
  * Author:           Flex
  * Author URI:       https://withflex.com/
@@ -27,6 +27,7 @@ use Flex\Resource\CheckoutSession\LineItem;
 use Flex\Resource\Coupon;
 use Flex\Resource\Price;
 use Flex\Resource\Product;
+use Flex\Resource\ResourceAction;
 use Flex\Resource\Webhook;
 use Sentry\ClientBuilder;
 use Sentry\Context\OsContext;
@@ -268,6 +269,9 @@ function activate() {
 		message: 'Plugin activated',
 		level: Severity::info(),
 	);
+
+	// Update the webhooks and sync the products if an API key is available.
+	payment_method_enabled();
 }
 register_activation_hook(
 	file: __FILE__,
@@ -282,6 +286,19 @@ function deactivate() {
 		message: 'Plugin deactivated',
 		level: Severity::warning(),
 	);
+
+	$gateway = payment_gateway();
+
+	// Refresh the settings from the database so we are working with the latest version.
+	$gateway->init_settings();
+
+	// If there is no API Key available, there is nothing more that can be done.
+	if ( empty( $gateway->api_key() ) ) {
+		return;
+	}
+
+	// Delete the webhook immediately.
+	Webhook::from_wc( $gateway )->exec( ResourceAction::DELETE );
 }
 register_deactivation_hook(
 	file: __FILE__,
@@ -670,11 +687,6 @@ function flex_update_webhook_async( int $retries = 0 ): void {
  * React to the payment method being enabled.
  */
 function payment_method_enabled(): void {
-	sentry()->captureMessage(
-		message: 'Payment method enabled',
-		level: Severity::info(),
-	);
-
 	$gateway = payment_gateway();
 
 	// Refresh the settings from the database so we are working with the latest version.
@@ -751,6 +763,10 @@ function update_option_wc_flex_settings( mixed $old_value, mixed $value ): void 
 	}
 
 	if ( 'yes' === $value['enabled'] && ( null === $old_value || ! isset( $old_value['enabled'] ) || 'no' === $old_value['enabled'] ) ) {
+		sentry()->captureMessage(
+			message: 'Payment method enabled',
+			level: Severity::info(),
+		);
 		payment_method_enabled();
 	} elseif ( 'no' === $value['enabled'] && 'yes' === $old_value['enabled'] ) {
 		payment_method_disabled();
@@ -778,6 +794,10 @@ function add_option_wc_flex_settings( string $option, mixed $value ): void {
 	}
 
 	if ( 'yes' === $value['enabled'] ) {
+		sentry()->captureMessage(
+			message: 'Payment method enabled',
+			level: Severity::info(),
+		);
 		payment_method_enabled();
 	}
 }
