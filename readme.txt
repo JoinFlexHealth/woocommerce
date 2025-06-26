@@ -57,6 +57,7 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 
 = 3.1.2 =
 * Changed the plugin activation/deactivation behavior. Activating the plugin will now register the webhooks and attempt perform a product sync if the API key is available. Deactivating the plugin will delete the webhooks.
+* Fixed an edge case were discounts were not applied if the Price did not already exist.
 
 = 3.1.1 =
 * Fixed a bug that would cause the [WooCommerce Stripe Payment Gateway](https://wordpress.org/plugins/woocommerce-gateway-stripe/) to crash.

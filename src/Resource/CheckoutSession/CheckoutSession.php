@@ -174,6 +174,9 @@ class CheckoutSession extends Resource {
 			action: 'wp_rest',
 		);
 
+		// A map of item_id => LineItem.
+		$line_items = array_map( static fn( $item ) => LineItem::from_wc( $item ), $order->get_items() );
+
 		$tax_rate = TaxRate::from_wc( $order );
 
 		// Recreate the discounts so we can get a line-item level discount.
@@ -205,7 +208,7 @@ class CheckoutSession extends Resource {
 					new Coupon(
 						name: $code,
 						amount_off: $amount_off,
-						applies_to: array_map( fn( $item_id ) => LineItem::from_wc( $order->get_item( $item_id ) )->price(), $item_ids ),
+						applies_to: array_map( static fn( $item_id ) => $line_items[ $item_id ]->price(), $item_ids ),
 					)
 				);
 			}
@@ -229,7 +232,7 @@ class CheckoutSession extends Resource {
 
 			$quantity = $item->get_quantity();
 
-			// Add a discount for each individiaul item.
+			// Add a discount for each individual item.
 			for ( $i = 0; $i < $quantity; $i++ ) {
 				$discounts[] = new Discount( $coupon );
 			}
@@ -243,7 +246,7 @@ class CheckoutSession extends Resource {
 			client_reference_id: (string) $order->get_id(),
 			status: Status::tryFrom( $order->get_meta( self::META_PREFIX . self::KEY_STATUS ) ),
 			mode: Mode::PAYMENT,
-			line_items: array_map( fn( $item ) => LineItem::from_wc( $item ), array_values( $order->get_items() ) ),
+			line_items: array_values( $line_items ),
 			amount_total: self::currency_to_unit_amount( $order->get_total() ),
 			test_mode: $order->meta_exists( self::META_PREFIX . self::KEY_TEST_MODE ) ? wc_string_to_bool( $order->get_meta( self::META_PREFIX . self::KEY_TEST_MODE ) ) : self::payment_gateway()->is_in_test_mode(),
 			shipping_options: ! empty( $order->get_shipping_methods() ) ? ShippingOptions::from_wc( $order ) : null,
