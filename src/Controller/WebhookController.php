@@ -179,12 +179,12 @@ class WebhookController extends Controller {
 			$order = $received->wc();
 
 			if ( null === $order ) {
-				$error = new FlexException( 'WooCommerce order does not exist for the given checkout_session_id' );
+				$message = 'WooCommerce order does not exist for the given checkout_session_id';
+				$error   = new FlexException( $message );
 				$this->logger->error( $error->getMessage(), $context );
-				sentry()->captureException( $error );
 				return new \WP_REST_Response(
 					data: array(
-						'error' => 'WooCommerce order does not exist for the given checkout_session_id',
+						'error' => $message,
 					),
 					status: 422
 				);
@@ -231,12 +231,12 @@ class WebhookController extends Controller {
 				$order = wc_get_order( $wc_refund->get_parent_id() );
 
 				if ( false === $order ) {
-					$error = new FlexException( 'WooCommerce order does not exist for the given refund_id' );
+					$message = 'WooCommerce order does not exist for the given refund_id';
+					$error   = new FlexException( $message );
 					$this->logger->error( $error->getMessage(), $context );
-					sentry()->captureException( $error );
 					return new \WP_REST_Response(
 						data: array(
-							'error' => 'WooCommerce order does not exist for the given refund_id',
+							'error' => $message,
 						),
 						status: 422
 					);
