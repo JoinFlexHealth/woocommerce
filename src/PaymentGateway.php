@@ -480,4 +480,29 @@ class PaymentGateway extends \WC_Payment_Gateway {
 
 		return str_starts_with( $api_key, 'fsk_test_' );
 	}
+
+	/**
+	 * {@inheritdoc}
+	 *
+	 * Remove Flex from checkout if the currency is not USD.
+	 */
+	public function is_available(): bool {
+		$order_id = absint( get_query_var( 'order-pay' ) );
+		$currency = null;
+
+		// Gets currency from "pay for order" page.
+		if ( 0 < $order_id ) {
+			$order    = wc_get_order( $order_id );
+			$currency = $order->get_currency();
+		} else {
+			// Get currency from the cart/session.
+			$currency = get_woocommerce_currency();
+		}
+
+		if ( 'USD' !== $currency ) {
+			return false;
+		}
+
+		return parent::is_available();
+	}
 }

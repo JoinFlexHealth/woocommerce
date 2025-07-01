@@ -59,6 +59,7 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 * Changed the plugin activation/deactivation behavior. Activating the plugin will now register the webhooks and attempt perform a product sync if the API key is available. Deactivating the plugin will delete the webhooks.
 * Fixed an edge case were discounts were not applied if the Price did not already exist.
 * Removed error reporting when an order is not found when receiving a webhook event. This error exclusively gets thrown by merchants with more than one environment.
+* Removed the Flex payment method when the cart or order currency is not United States Dollar (USD).
 
 = 3.1.1 =
 * Fixed a bug that would cause the [WooCommerce Stripe Payment Gateway](https://wordpress.org/plugins/woocommerce-gateway-stripe/) to crash.
