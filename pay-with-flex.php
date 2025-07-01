@@ -40,6 +40,8 @@ use Sentry\State\HubInterface;
 use Sentry\State\Scope;
 use Sentry\Util\PHPVersion;
 
+defined( 'ABSPATH' ) || exit;
+
 /**
  * Add the autoloader and action schedular.
  */
