@@ -71,21 +71,33 @@ class WebhookController extends Controller {
 	 * @param bool             $test_mode Whether the request is a test mode request or not.
 	 */
 	public function permission_callback( \WP_REST_Request $request, bool $test_mode = false ): bool {
-		$webhook = Webhook::from_wc( payment_gateway(), $test_mode );
-		$content = $request->get_header( 'flex-event-id' ) . '.' . $request->get_header( 'flex-timestamp' ) . '.' . $request->get_body();
+		$webhook   = Webhook::from_wc( payment_gateway(), $test_mode );
+		$event_id  = $request->get_header( 'webhook-id' ) ?? $request->get_header( 'svix-id' ) ?? $request->get_header( 'flex-event-id' );
+		$timestamp = $request->get_header( 'webhook-timestamp' ) ?? $request->get_header( 'svix-timestamp' ) ?? $request->get_header( 'flex-timestamp' );
+
+		$content = $event_id . '.' . $timestamp . '.' . $request->get_body();
+
+		$signature = '';
+		$versioned = $request->get_header( 'webhook-signature' ) ?? $request->get_header( 'svix-signature' );
+		if ( $versioned ) {
+			[$sig]         = explode( ' ', $versioned );
+			[, $signature] = explode( ',', $sig );
+		} else {
+			$signature = $request->get_header( 'flex-signature' );
+		}
 
 		$result = hash_equals(
 			hash_hmac( 'sha256', $content, $webhook->secret(), true ),
-			base64_decode( $request->get_header( 'flex-signature' ) ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode
+			base64_decode( $signature ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode
 		);
 
 		if ( false === $result ) {
 			$this->logger->notice(
 				'[Flex] Webhook Permission Check Failure',
 				array(
-					'event_id'   => $request->get_header( 'flex-event-id' ),
-					'timestamp'  => $request->get_header( 'flex-timestamp' ),
-					'signature'  => $request->get_header( 'flex-signature' ),
+					'event_id'   => $event_id,
+					'timestamp'  => $timestamp,
+					'signature'  => $signature,
 					'test_mode'  => $test_mode,
 					'webhook_id' => $webhook->id(),
 				),
