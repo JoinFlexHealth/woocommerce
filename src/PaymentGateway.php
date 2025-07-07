@@ -23,6 +23,7 @@ use Sentry\State\Scope;
  */
 class PaymentGateway extends \WC_Payment_Gateway {
 
+	protected const ENABLED = 'enabled';
 	protected const API_KEY = 'api_key';
 
 	/**
@@ -74,6 +75,8 @@ class PaymentGateway extends \WC_Payment_Gateway {
 			}
 			// @phpstan-ignore return.void
 			add_action( 'woocommerce_update_options_payment_gateways_' . $this->id, array( $this, 'process_admin_options' ) );
+
+			add_action( 'admin_notices', array( $this, 'display_errors' ), 9999 );
 		}
 	}
 
@@ -376,11 +379,55 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	}
 
 	/**
+	 * {@inheritdoc}
+	 *
+	 * @param string $key Field key.
+	 * @param array  $field Field array.
+	 * @param array  $post_data Posted data.
+	 * @return string
+	 * @throws \Exception If the payment method is being enabled, but the API key is not present or is invalid.
+	 */
+	public function get_field_value( $key, $field, $post_data = array() ) {
+		$value = parent::get_field_value( $key, $field, $post_data );
+		if ( self::ENABLED !== $key ) {
+			return $value;
+		}
+
+		// If the payment method is not being enabled, then nothing needs to be done.
+		if ( 'no' === $value ) {
+			return $value;
+		}
+
+		$api_key = '';
+		if ( defined( 'FLEX_API_KEY' ) ) {
+			$api_key = \FLEX_API_KEY;
+		} elseif ( defined( 'WC_FLEX_API_KEY' ) ) {
+			$api_key = \WC_FLEX_API_KEY;
+		} else {
+			// Retrieve the api key from the form.
+			try {
+				$api_key = $this->get_field_value( self::API_KEY, $this->get_form_fields()[ self::API_KEY ], $post_data );
+			} catch ( \Throwable $previous ) {
+				throw new \Exception(
+					message: 'Payment method cannot be enabled without an API Key',
+					previous: $previous, // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+				);
+			}
+		}
+
+		if ( empty( $api_key ) ) {
+			throw new \Exception( 'Payment method cannot be enabled without an API Key' );
+		}
+
+		return $value;
+	}
+
+	/**
 	 * Initializes settings form fields.
 	 */
 	public function init_form_fields() {
 		$this->form_fields = array(
-			'enabled'     => array(
+			self::ENABLED => array(
 				'title'   => __( 'Enable/Disable', 'pay-with-flex' ),
 				'type'    => 'checkbox',
 				'label'   => __( 'Enable Flex', 'pay-with-flex' ),
@@ -401,8 +448,13 @@ class PaymentGateway extends \WC_Payment_Gateway {
 
 					$clean = $this->validate_text_field( self::API_KEY, $value );
 
+					// If the API key field is empty, let the user continue.
+					if ( '' === $clean ) {
+						return $clean;
+					}
+
 					if ( ! str_starts_with( $clean, 'fsk_' ) ) {
-						throw new FlexException( 'API Key must start with fsk_' );
+						throw new \Exception( 'API Key must start with fsk_' );
 					}
 
 					return $clean;
