@@ -3,7 +3,7 @@ Contributors: withflex, davidbarratt
 Tags: hsa, fsa, payments, woocommerce
 Requires at least: 6.8
 Tested up to: 6.8
-Stable tag: 3.1.2
+Stable tag: 3.1.3
 Requires PHP: 8.1
 License: GPLv3 or later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -54,6 +54,11 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 4. Flex promotes your brand to engaged buyers looking to spend the $150B in HSA/FSA accounts.
 
 == Changelog ==
+
+= 3.1.3 =
+* Fixed an exception that prevented the plugin from being activated.
+* Upgraded Sentry to 4.14.2.
+* Upgraded Jetpack Autoloader to 5.0.9.
 
 = 3.1.2 =
 * Changed the plugin activation/deactivation behavior. Activating the plugin will now register the webhooks and attempt perform a product sync if the API key is available. Deactivating the plugin will delete the webhooks.
