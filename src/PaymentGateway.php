@@ -399,9 +399,9 @@ class PaymentGateway extends \WC_Payment_Gateway {
 		}
 
 		$api_key = '';
-		if ( defined( 'FLEX_API_KEY' ) ) {
+		if ( defined( 'FLEX_API_KEY' ) && is_string( \FLEX_API_KEY ) ) {
 			$api_key = \FLEX_API_KEY;
-		} elseif ( defined( 'WC_FLEX_API_KEY' ) ) {
+		} elseif ( defined( 'WC_FLEX_API_KEY' ) && is_string( \WC_FLEX_API_KEY ) ) {
 			$api_key = \WC_FLEX_API_KEY;
 		} else {
 			// Retrieve the api key from the form.
@@ -426,6 +426,7 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	 * Initializes settings form fields.
 	 */
 	public function init_form_fields() {
+		$has_defined_key   = ( defined( 'FLEX_API_KEY' ) && is_string( \FLEX_API_KEY ) ) || ( defined( 'WC_FLEX_API_KEY' ) && is_string( \WC_FLEX_API_KEY ) );
 		$this->form_fields = array(
 			self::ENABLED => array(
 				'title'   => __( 'Enable/Disable', 'pay-with-flex' ),
@@ -436,8 +437,8 @@ class PaymentGateway extends \WC_Payment_Gateway {
 			self::API_KEY => array(
 				'title'             => __( 'API Key', 'pay-with-flex' ),
 				'type'              => 'text',
-				'placeholder'       => defined( 'FLEX_API_KEY' ) || defined( 'WC_FLEX_API_KEY' ) ? '(hidden)' : '',
-				'disabled'          => defined( 'FLEX_API_KEY' ) || defined( 'WC_FLEX_API_KEY' ),
+				'placeholder'       => $has_defined_key ? '(hidden)' : '',
+				'disabled'          => $has_defined_key,
 				'description'       => __( 'An API Key may be obtained from the', 'pay-with-flex' ) . ' <a href="https://dashboard.withflex.com/apikeys" target="_blank">' . __( 'Flex Dashboard', 'pay-with-flex' ) . '</a>.',
 				'desc_tip'          => __( 'Alternatively, set the FLEX_API_KEY constant in wp-config.php which is more secure.', 'pay-with-flex' ),
 				'sanitize_callback' => function ( $value ) {
@@ -510,11 +511,11 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	 * Returns the Flex API key.
 	 */
 	public function api_key(): ?string {
-		if ( defined( 'FLEX_API_KEY' ) ) {
+		if ( defined( 'FLEX_API_KEY' ) && is_string( \FLEX_API_KEY ) ) {
 			return \FLEX_API_KEY;
 		}
 
-		if ( defined( 'WC_FLEX_API_KEY' ) ) {
+		if ( defined( 'WC_FLEX_API_KEY' ) && is_string( \WC_FLEX_API_KEY ) ) {
 			return \WC_FLEX_API_KEY;
 		}
 
