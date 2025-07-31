@@ -75,16 +75,19 @@ function sentry(): HubInterface {
 	static $hub = null;
 
 	if ( null === $hub ) {
-		$data = get_plugin_data(
-			plugin_file: __FILE__,
-			translate: false
-		);
+		$data = array();
+		if ( function_exists( 'get_plugin_data' ) ) {
+			$data = get_plugin_data(
+				plugin_file: __FILE__,
+				translate: false
+			);
+		}
 
 		$client = ClientBuilder::create(
 			array(
 				'dsn'                  => 'https://7d4678d6fe3174eb2a6817500256e5d3@o4505602776694784.ingest.us.sentry.io/4509358008958976',
-				'environment'          => wp_get_environment_type(),
-				'release'              => $data['Version'],
+				'environment'          => function_exists( 'wp_get_environment_type' ) ? wp_get_environment_type() : null,
+				'release'              => $data['Version'] ?? null,
 				'in_app_include'       => array( __DIR__ ),
 				'default_integrations' => false,
 				// Exclude any events that are not "in app" as defined above.
@@ -135,12 +138,13 @@ function sentry(): HubInterface {
 		$hub->configureScope(
 			function ( Scope $scope ) {
 
-				$scope->setTags(
-					array(
-						'site'     => get_bloginfo( 'name' ),
-						'site.url' => home_url(),
-					),
-				);
+				if ( function_exists( 'get_bloginfo' ) ) {
+					$scope->setTag( 'site', get_bloginfo( 'name' ) );
+				}
+
+				if ( function_exists( 'home_url' ) ) {
+					$scope->setTag( 'site.url', home_url() );
+				}
 
 				$scope->addEventProcessor(
 					function ( Event $event ) {
@@ -185,20 +189,26 @@ function sentry(): HubInterface {
 						 */
 						if ( empty( $event->getModules() ) ) {
 
-							$modules = array(
-								'wordpress' => wp_get_wp_version(),
-							);
+							$modules = array();
 
-							foreach ( get_plugins() as $plugin => $info ) {
-								if ( ! is_plugin_active( $plugin ) ) {
-									continue;
-								}
-
-								$modules[ $plugin ] = $info['Version'];
+							if ( function_exists( 'wp_get_wp_version' ) ) {
+								$modules['wordpress'] = wp_get_wp_version();
 							}
 
-							$theme                               = wp_get_theme();
-							$modules[ $theme->get_stylesheet() ] = $theme->version;
+							if ( function_exists( 'get_plugins' ) && function_exists( 'is_plugin_active' ) ) {
+								foreach ( get_plugins() as $plugin => $info ) {
+									if ( ! is_plugin_active( $plugin ) ) {
+										continue;
+									}
+
+									$modules[ $plugin ] = $info['Version'];
+								}
+							}
+
+							if ( function_exists( 'wp_get_theme' ) ) {
+								$theme                               = wp_get_theme();
+								$modules[ $theme->get_stylesheet() ] = $theme->version;
+							}
 
 							$event->setModules( $modules );
 						}

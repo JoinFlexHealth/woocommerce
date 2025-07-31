@@ -57,6 +57,7 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 
 = 3.1.4 =
 * Fixed an exception that prevented the plugin from being activated.
+* Changed telemetry metadata to only include data that is already available.
 
 = 3.1.3 =
 * Fixed an exception that prevented the plugin from being activated.
