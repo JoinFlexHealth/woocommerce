@@ -2,7 +2,7 @@
 /**
  * Plugin Name:      Flex HSA/FSA Payments
  * Description:      Accept HSA/FSA payments directly in the checkout flow.
- * Version:          3.1.4
+ * Version:          3.1.5
  * Plugin URI:       https://wordpress.org/plugins/pay-with-flex/
  * Author:           Flex
  * Author URI:       https://withflex.com/
@@ -256,6 +256,37 @@ function sentry(): HubInterface {
 }
 
 /**
+ * Fix dependency hell.
+ *
+ * @see https://github.com/cloudflare/Cloudflare-WordPress/issues/554
+ */
+function fix_dependencies() {
+	// By loading the NullLogger from Cloudflare before it's used by Sentry, Sentry will
+	// use that version rather than the version in the newer version, thereby avoiding
+	// the fatal error.
+	if ( function_exists( 'is_plugin_active' ) && is_plugin_active( 'cloudflare/cloudflare.php' ) ) {
+		$path = WP_PLUGIN_DIR . '/cloudflare/vendor/psr/log/Psr/Log/NullLogger.php';
+		if ( file_exists( $path ) ) {
+			require_once $path;
+		}
+	}
+}
+
+/**
+ * Plugins loaded.
+ *
+ * @see https://github.com/cloudflare/Cloudflare-WordPress/issues/554
+ */
+function plugins_loaded() {
+	fix_dependencies();
+}
+add_action(
+	hook_name: 'plugins_loaded',
+	callback: __NAMESPACE__ . '\plugins_loaded'
+);
+
+
+/**
  * Add payment gateway tags.
  *
  * @param \WC_Payment_Gateways $gateways The payment gateways that were initialzed by WooCommerce.
@@ -280,6 +311,8 @@ add_action(
  * Activate the plugin.
  */
 function activate() {
+	fix_dependencies();
+
 	sentry()->captureMessage(
 		message: 'Plugin activated',
 		level: Severity::info(),
@@ -297,6 +330,8 @@ register_activation_hook(
  * Deactivate the plugin.
  */
 function deactivate() {
+	fix_dependencies();
+
 	sentry()->captureMessage(
 		message: 'Plugin deactivated',
 		level: Severity::warning(),
