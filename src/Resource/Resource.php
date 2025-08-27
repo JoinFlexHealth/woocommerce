@@ -117,6 +117,7 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 			$base . $path,
 			array_merge(
 				array(
+					'timeout' => 10,
 					'headers' => array_merge(
 						$headers,
 						$args['headers'] ?? array(),

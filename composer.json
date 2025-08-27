@@ -1,6 +1,6 @@
 {
+  "type": "wordpress-plugin",
 	"require": {
-		"automattic/jetpack-autoloader": ">=5",
 		"symfony/polyfill-php84": ">=1.31",
 		"sentry/sentry": ">=4.11"
 	},
@@ -10,9 +10,6 @@
 		}
 	},
 	"config": {
-		"optimize-autoloader": true,
-		"allow-plugins": {
-			"automattic/jetpack-autoloader": true
-		}
+		"optimize-autoloader": true
 	}
 }

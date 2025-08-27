@@ -1,2 +1,4 @@
 /client
+/excludes
 /node_modules
+scoper.inc.php
