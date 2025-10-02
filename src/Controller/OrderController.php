@@ -30,7 +30,7 @@ class OrderController extends Controller {
 			route: '/orders/(?P<id>[\d]+)/complete',
 			args: array(
 				'callback'            => array( $controller, 'complete' ),
-				'permission_callback' => '__return_true',
+				'permission_callback' => array( $controller, 'permission_callback' ),
 				'args'                => array(
 					'id' => array(
 						'required' => true,
@@ -38,6 +38,30 @@ class OrderController extends Controller {
 				),
 			),
 		);
+	}
+
+	/**
+	 * Ensure the nonce matches before attempting to process the request.
+	 *
+	 * @param \WP_REST_Request $request The Request.
+	 */
+	public function permission_callback( \WP_REST_Request $request ): bool {
+		$id = $request->get_param( 'id' );
+		if ( empty( $id ) ) {
+			return false;
+		}
+
+		$key = $request->get_param( 'key' );
+		if ( empty( $key ) ) {
+			return false;
+		}
+
+		$order = wc_get_order( $id );
+		if ( false === $order ) {
+			return false;
+		}
+
+		return $order->key_is_valid( $key );
 	}
 
 	/**
@@ -61,7 +85,7 @@ class OrderController extends Controller {
 		}
 
 		// If the order is in a 'pending' state and the nonce is valid, then attempt to update the order.
-		if ( OrderStatus::PENDING === $order->get_status() && false !== wp_verify_nonce( $request->get_param( '_wpnonce' ), 'wp_rest' ) ) {
+		if ( OrderStatus::PENDING === $order->get_status() ) {
 			$checkout_session = CheckoutSession::from_wc( $order );
 			$checkout_session->exec( ResourceAction::REFRESH );
 

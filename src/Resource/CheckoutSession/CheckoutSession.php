@@ -167,11 +167,12 @@ class CheckoutSession extends Resource {
 	public static function from_wc( \WC_Order $order ): self {
 		$id          = $order->get_transaction_id();
 		$order_id    = $order->get_id();
-		$success_url = wp_nonce_url(
-			actionurl: get_rest_url(
+		$success_url = add_query_arg(
+			'key',
+			$order->get_order_key(),
+			get_rest_url(
 				path: Controller::NAMESPACE . "/orders/$order_id/complete",
 			),
-			action: 'wp_rest',
 		);
 
 		// A map of item_id => LineItem.
