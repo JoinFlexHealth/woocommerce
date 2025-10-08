@@ -23,34 +23,41 @@ $exclude_finder = Finder::create() // @phpstan-ignore class.notFound
 foreach ( $exclude_finder as $file ) {
 	$excluded_files[] = str_replace( __DIR__ . '/', '', $file->getPathname() );
 }
-$excluded     = array();
-$excludes_dir = __DIR__ . '/../../excludes';
+$excluded = array();
+$dirs     = array(
+	__DIR__ . '/../../excludes',
+	__DIR__ . '/../../vendor/sniccowp/php-scoper-wordpress-excludes/generated',
+);
 
 $excluded_classes   = array();
 $excluded_functions = array();
 $excluded_constants = array();
 
-if ( is_dir( $excludes_dir ) ) {
-	$files = scandir( $excludes_dir );
+foreach ( $dirs as $dir ) {
+	if ( ! is_dir( $dir ) ) {
+		throw new \Exception( "Directory does not exist: $dir" ); //phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+	}
+
+	$files = scandir( $dir );
 
 	foreach ( $files as $file ) {
-		if ( '.' === $file || '..' === $file || pathinfo( $file, PATHINFO_EXTENSION ) !== 'php' ) {
+		if ( '.' === $file || '..' === $file || pathinfo( $file, PATHINFO_EXTENSION ) !== 'json' ) {
 					continue;
 		}
-		$file_path = $excludes_dir . '/' . $file;
-		$symbols   = require $file_path;
+		$file_path = $dir . '/' . $file;
+		$symbols   = json_decode( file_get_contents( $file_path ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 
-		if ( str_ends_with( $file, '-classes.php' ) || str_ends_with( $file, '-interfaces.php' ) ) {
+		if ( str_ends_with( $file, '-classes.json' ) || str_ends_with( $file, '-interfaces.json' ) || str_ends_with( $file, '-traits.json' ) ) {
 			$excluded_classes = array_merge( $excluded_classes, $symbols );
 			continue;
 		}
 
-		if ( str_ends_with( $file, '-constants.php' ) ) {
+		if ( str_ends_with( $file, '-constants.json' ) ) {
 			$excluded_constants = array_merge( $excluded_constants, $symbols );
 			continue;
 		}
 
-		if ( str_ends_with( $file, '-functions.php' ) ) {
+		if ( str_ends_with( $file, '-functions.json' ) ) {
 			$excluded_functions = array_merge( $excluded_functions, $symbols );
 			continue;
 		}

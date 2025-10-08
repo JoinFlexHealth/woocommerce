@@ -55,6 +55,9 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 
 == Changelog ==
 
+= 3.1.8 =
+* Simplify PHP Scoper Excludes by using stubs.
+
 = 3.1.7 =
 * Fixed a security vulnerability that allowed an attacker to retrieve completed orders within a short window after the order was placed.
 
