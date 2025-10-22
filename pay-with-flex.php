@@ -2,7 +2,7 @@
 /**
  * Plugin Name:      Flex HSA/FSA Payments
  * Description:      Accept HSA/FSA payments directly in the checkout flow.
- * Version:          3.1.9
+ * Version:          3.1.10
  * Plugin URI:       https://wordpress.org/plugins/pay-with-flex/
  * Author:           Flex
  * Author URI:       https://withflex.com/
@@ -18,6 +18,7 @@ declare(strict_types=1);
 
 namespace Flex;
 
+use Automattic\WooCommerce\Blocks\Payments\PaymentMethodRegistry;
 use Automattic\WooCommerce\Enums\ProductType;
 use Flex\Controller\OrderController;
 use Flex\Controller\WebhookController;
@@ -820,23 +821,29 @@ add_action(
 );
 
 /**
- * Add the Payment Gateway.
+ * Register the Payment Gateway.
  *
  * @param string[] $methods An array of Payment method classes.
  */
+function wc_payment_gateways( array $methods = array() ): array {
+	return array( ...$methods, PaymentGateway::class );
+}
 add_filter(
 	hook_name: 'woocommerce_payment_gateways',
-	callback: array( PaymentGateway::class, 'wc_payment_gateways' ),
+	callback: __NAMESPACE__ . '\wc_payment_gateways',
 );
 
 /**
- * Add the Payment Method.
+ * Register the payment method.
  *
- * @param string[] $methods An array of Payment method classes.
+ * @param PaymentMethodRegistry $payment_method_registry The WooCommerce payment method registry.
  */
+function wc_blocks_payment_method_type_registration( PaymentMethodRegistry $payment_method_registry ) {
+	$payment_method_registry->register( new PaymentMethod() );
+}
 add_filter(
 	hook_name: 'woocommerce_blocks_payment_method_type_registration',
-	callback: array( PaymentMethod::class, 'wc_blocks_payment_method_type_registration' ),
+	callback: __NAMESPACE__ . '\wc_blocks_payment_method_type_registration',
 );
 
 /**

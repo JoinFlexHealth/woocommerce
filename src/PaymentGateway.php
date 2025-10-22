@@ -91,15 +91,6 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	}
 
 	/**
-	 * Register this class as a Payment Gateway.
-	 *
-	 * @param string[] $methods An array of Payment method classes.
-	 */
-	public static function wc_payment_gateways( array $methods = array() ): array {
-		return array( ...$methods, self::class );
-	}
-
-	/**
 	 * {@inheritdoc}
 	 *
 	 * @param int $order_id The id of the order.

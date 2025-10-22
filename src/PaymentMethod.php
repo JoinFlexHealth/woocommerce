@@ -10,7 +10,6 @@ declare(strict_types=1);
 namespace Flex;
 
 use Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType;
-use Automattic\WooCommerce\Blocks\Payments\PaymentMethodRegistry;
 
 /**
  * Flex Payment Method.
@@ -23,15 +22,6 @@ class PaymentMethod extends AbstractPaymentMethodType {
 	 * @var string
 	 */
 	protected $name = 'flex';
-
-	/**
-	 * Register the payment method.
-	 *
-	 * @param PaymentMethodRegistry $payment_method_registry The WooCommerce payment method registry.
-	 */
-	public static function wc_blocks_payment_method_type_registration( PaymentMethodRegistry $payment_method_registry ) {
-		$payment_method_registry->register( new self() );
-	}
 
 	/**
 	 * {@inheritdoc}
