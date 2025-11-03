@@ -56,10 +56,17 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 		// Split the string based on the decimal separator.
 		$parts = explode( wc_get_price_decimal_separator(), (string) $value );
 
-		return intval(
-			// Remove the thousand separator and concatenate the dollars with the padded cents.
-			str_replace( wc_get_price_thousand_separator(), '', $parts[0] ) . str_pad( $parts[1] ?? '', wc_get_price_decimals(), '0' )
-		);
+		// Get the dollar amount (remove thousand separators).
+		$dollars = str_replace( wc_get_price_thousand_separator(), '', $parts[0] );
+
+		// Get cents: take first 2 characters if present, otherwise use empty string.
+		// This handles 0, 2, or 4+ decimal configurations correctly.
+		$cents = isset( $parts[1] ) ? substr( $parts[1], 0, 2 ) : '';
+
+		// Pad cents to exactly 2 digits.
+		$cents = str_pad( $cents, 2, '0' );
+
+		return intval( $dollars . $cents );
 	}
 
 	/**
