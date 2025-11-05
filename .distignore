@@ -1,4 +1,6 @@
 /client
 /excludes
 /node_modules
+/tests
+phpunit.xml
 scoper.inc.php
