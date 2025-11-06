@@ -104,15 +104,18 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 
 		$span = sentry()->getSpan();
 		if ( null !== $span ) {
-			$headers['traceparent'] = $span->toW3CTraceparent();
+			$headers['baggage']      = $span->toBaggage();
+			$headers['sentry-trace'] = $span->toTraceparent();
 		}
+
+		$method = $args['method'] ?? 'GET';
 
 		/**
 		 * The metadata to add to the breadcrumb
 		 * https://develop.sentry.dev/sdk/data-model/event-payloads/breadcrumbs/#breadcrumb-types
 		 */
 		$meta = array(
-			'method' => $args['method'] ?? 'GET',
+			'method' => $method,
 			'url'    => $base . $path,
 		);
 
@@ -152,19 +155,6 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 
 		$meta['status_code'] = $code;
 
-		if ( $code < 200 || $code >= 300 ) {
-			sentry()->addBreadcrumb(
-				new Breadcrumb(
-					category: 'request',
-					level: Breadcrumb::LEVEL_ERROR,
-					type: Breadcrumb::TYPE_HTTP,
-					metadata: $meta,
-				)
-			);
-			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
-			throw new FlexResponseException( $response, 'Flex responded with a ' . $code );
-		}
-
 		$body = wp_remote_retrieve_body( $response );
 
 		if ( ! $body ) {
@@ -177,7 +167,20 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 				),
 			);
 			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
-			throw new FlexResponseException( $response, 'Missing response body.' );
+			throw new FlexResponseException( $response, "Missing Response Body $method $path $code" );
+		}
+
+		if ( $code < 200 || $code >= 300 ) {
+			sentry()->addBreadcrumb(
+				new Breadcrumb(
+					category: 'request',
+					level: Breadcrumb::LEVEL_ERROR,
+					type: Breadcrumb::TYPE_HTTP,
+					metadata: $meta,
+				)
+			);
+			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+			throw new FlexResponseException( $response, "Response Failed $method $path $code $body" );
 		}
 
 		try {

@@ -12,6 +12,7 @@ namespace Flex\Resource;
 use Automattic\WooCommerce\Enums\ProductStatus;
 use Automattic\WooCommerce\Enums\ProductType;
 use Flex\Exception\FlexException;
+use Flex\Exception\FlexResponseException;
 
 /**
  * Flex Price
@@ -254,7 +255,8 @@ class Price extends Resource implements ResourceInterface {
 	 *
 	 * @param ResourceAction $action The action to perform.
 	 *
-	 * @throws FlexException If anything goes wrong.
+	 * @throws FlexException If the response is malformed.
+	 * @throws FlexResponseException Rethrows exception if it cannot be handled.
 	 */
 	public function exec( ResourceAction $action ): void {
 		if ( ! $this->can( $action ) ) {
@@ -280,35 +282,68 @@ class Price extends Resource implements ResourceInterface {
 			);
 
 			// Retrieve the existing price so we do not drop any existing values on re-creation.
-			$data = $this->remote_request(
-				'/v1/prices/' . $this->id,
-			);
+			try {
+				$data = $this->remote_request(
+					'/v1/prices/' . $this->id,
+				);
 
-			if ( isset( $data['price'] ) && is_array( $data['price'] ) ) {
-				// Remove fields that we no longer care about.
-				unset( $data['price']['price_id'] );
-				unset( $data['price']['price'] );
+				if ( isset( $data['price'] ) && is_array( $data['price'] ) ) {
+					// Remove fields that we no longer care about.
+					unset( $data['price']['price_id'] );
+					unset( $data['price']['price'] );
 
-				$price = array_merge( $data['price'], $this->jsonSerialize() );
+					$price = array_merge( $data['price'], $this->jsonSerialize() );
+				}
+			} catch ( FlexResponseException $e ) {
+				if ( $e->code() !== 404 ) {
+					throw $e;
+				}
+
+				$existing = null;
 			}
 		}
 
-		$data = $this->remote_request(
-			match ( $action ) {
-				ResourceAction::CREATE =>  '/v1/prices',
-				ResourceAction::UPDATE =>  '/v1/prices/' . $this->id,
-			},
-			array(
-				'method' => 'POST',
-				'flex'   => array( 'data' => array( 'price' => $price ) ),
-			),
-		);
+		try {
+			$data = $this->remote_request(
+				match ( $action ) {
+					ResourceAction::CREATE =>  '/v1/prices',
+					ResourceAction::UPDATE =>  '/v1/prices/' . $this->id,
+				},
+				array(
+					'method' => 'POST',
+					'flex'   => array( 'data' => array( 'price' => $price ) ),
+				),
+			);
 
-		if ( ! isset( $data['price'] ) ) {
-			throw new FlexException( 'Missing price in response.' );
+			if ( ! isset( $data['price'] ) ) {
+				throw new FlexException( 'Missing price in response.' );
+			}
+
+			$this->extract( $data['price'] );
+		} catch ( FlexResponseException $e ) {
+			// Ensure the price exists before trying again.
+			if ( $e->code() === 422 ) {
+				$prev = $this->product->id();
+				$this->product->exec( ResourceAction::REFRESH );
+				// If the product ids no longer match then the product was re-created.
+				if ( $this->product->id() !== $prev ) {
+					$this->exec( $action );
+					return;
+				}
+			}
+
+			if ( ResourceAction::CREATE === $action ) {
+				throw $e;
+			}
+
+			// Recreate the price.
+			if ( $e->code() === 404 ) {
+				$this->exec( ResourceAction::CREATE );
+				return;
+			}
+
+			throw $e;
 		}
-
-		$this->extract( $data['price'] );
 
 		if ( null !== $this->wc ) {
 			$this->apply_to( $this->wc );

@@ -12,6 +12,7 @@ namespace Flex\Resource;
 use Automattic\WooCommerce\Enums\ProductStatus;
 use Automattic\WooCommerce\Enums\ProductType;
 use Flex\Exception\FlexException;
+use Flex\Exception\FlexResponseException;
 
 /**
  * Flex Product
@@ -231,7 +232,7 @@ class Product extends Resource implements ResourceInterface {
 	public function can( ResourceAction $action ): bool {
 			return match ( $action ) {
 				ResourceAction::CREATE => true,
-				ResourceAction::UPDATE => null !== $this->id,
+				ResourceAction::UPDATE, ResourceAction::REFRESH => null !== $this->id,
 				default => false,
 			};
 	}
@@ -241,7 +242,8 @@ class Product extends Resource implements ResourceInterface {
 	 *
 	 * @param ResourceAction $action The action to perform.
 	 *
-	 * @throws FlexException If anything goes wrong.
+	 * @throws FlexException If the response is malformed.
+	 * @throws FlexResponseException Rethrows exception if it cannot be handled.
 	 */
 	public function exec( ResourceAction $action ): void {
 		if ( ! $this->can( $action ) ) {
@@ -259,37 +261,63 @@ class Product extends Resource implements ResourceInterface {
 			);
 
 			// Retrieve the existing product so we do not drop any existing values on re-creation.
-			$data = $this->remote_request(
-				'/v1/products/' . $this->id,
-			);
+			try {
+				$data = $this->remote_request(
+					'/v1/products/' . $this->id,
+				);
 
-			if ( isset( $data['product'] ) && is_array( $data['product'] ) ) {
-				// Remove fields that we no longer care about.
-				unset( $data['product']['product_id'] );
+				if ( isset( $data['product'] ) && is_array( $data['product'] ) ) {
+					// Remove fields that we no longer care about.
+					unset( $data['product']['product_id'] );
 
-				$product = array_merge( $data['product'], $this->jsonSerialize() );
+					$product = array_merge( $data['product'], $this->jsonSerialize() );
+				}
+			} catch ( FlexResponseException $e ) {
+				if ( $e->code() !== 404 ) {
+					throw $e;
+				}
+
+				$existing = null;
 			}
 		}
 
-		$data = $this->remote_request(
-			match ( $action ) {
-				ResourceAction::CREATE =>  '/v1/products',
-				ResourceAction::UPDATE =>  '/v1/products/' . $this->id,
-			},
-			array(
-				'method' => match ( $action ) {
-					ResourceAction::CREATE => 'POST',
-					ResourceAction::UPDATE => 'PATCH',
+		try {
+			$data = $this->remote_request(
+				match ( $action ) {
+					ResourceAction::CREATE =>  '/v1/products',
+					ResourceAction::UPDATE, ResourceAction::REFRESH =>  '/v1/products/' . $this->id,
 				},
-				'flex'   => array( 'data' => array( 'product' => $product ) ),
-			),
-		);
+				array(
+					'method' => match ( $action ) {
+						ResourceAction::CREATE => 'POST',
+						ResourceAction::UPDATE => 'PATCH',
+						ResourceAction::REFRESH => 'GET',
+					},
+					'flex'   => match ( $action ) {
+						ResourceAction::CREATE, ResourceAction::UPDATE => array( 'data' => array( 'product' => $product ) ),
+						ResourceAction::REFRESH => array(),
+					},
+				),
+			);
 
-		if ( ! isset( $data['product'] ) ) {
-			throw new FlexException( 'Missing product in response.' );
+			if ( ! isset( $data['product'] ) ) {
+				throw new FlexException( 'Missing product in response.' );
+			}
+
+			$this->extract( $data['product'] );
+		} catch ( FlexResponseException $e ) {
+			if ( ResourceAction::CREATE === $action ) {
+				throw $e;
+			}
+
+			if ( $e->code() !== 404 ) {
+				throw $e;
+			}
+
+			// If an update or refresh was being performed and the API returned a 404, then re-create it.
+			$this->exec( ResourceAction::CREATE );
+			return;
 		}
-
-		$this->extract( $data['product'] );
 
 		if ( null !== $this->wc ) {
 			$this->apply_to( $this->wc );

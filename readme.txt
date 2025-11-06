@@ -55,6 +55,10 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 
 == Changelog ==
 
+= 3.1.12 =
+* Fixed a bug that prevented products and prices from being created if they already exist under a different account.
+* Changed the plugin and payment method activation behavior. Product & Price syncing is now spawned asyncoursly which significantly improves the plugin activation speed.
+
 = 3.1.11 =
 * Fixed a bug where prices without cents were being incorrectly calculated.
 

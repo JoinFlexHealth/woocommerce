@@ -697,6 +697,64 @@ function flex_update_webhook_async( int $retries = 0 ): void {
 }
 
 /**
+ * Enqueues a page of products to be synced.
+ *
+ * @param int $page The page number to enqueue.
+ * @param int $retries The number of retries that have been attempted.
+ *
+ * @throws \Exception If the product fails to be updated.
+ */
+function flex_product_sync_spawn( int $page, int $retries = 0 ): void {
+	flex_enqueue_async_action(
+		hook: 'flex_product_sync',
+		args: array( $page, $retries ),
+		retries: $retries,
+	);
+}
+
+/**
+ * Syncs a page of products with Flex.
+ *
+ * @param int $page The page number to sync.
+ * @param int $retries The number of retries that have been attempted.
+ *
+ * @throws FlexException If the API key is not set.
+ * @throws \Throwable Any caught exceptions.
+ */
+function flex_product_sync( int $page, int $retries = 0 ): void {
+	try {
+		$gateway = payment_gateway();
+		if ( empty( $gateway->api_key() ) ) {
+			throw new FlexException( 'API Key is not set' );
+		}
+
+		/**
+		 * Fetch all of the products we support.
+		 *
+		 * @var \WC_Product[]
+		 */
+		$products = wc_get_products(
+			array(
+				'page' => $page,
+				'type' => array_merge( Product::WC_TYPES, Price::WC_TYPES ),
+			)
+		);
+
+		// Enqueue all of them to be updated.
+		foreach ( $products as $product ) {
+			wc_update_product( $product->get_id(), $product );
+		}
+	} catch ( \Throwable $previous ) {
+		flex_product_sync_spawn( $page, $retries + 1 );
+		throw $previous;
+	}
+}
+add_action(
+	hook_name: 'flex_product_sync',
+	callback: __NAMESPACE__ . '\flex_product_sync',
+);
+
+/**
  * React to the payment method being enabled.
  */
 function payment_method_enabled(): void {
@@ -716,27 +774,15 @@ function payment_method_enabled(): void {
 		flex_update_webhook_async();
 	}
 
-	for ( $i = 1; ; $i++ ) {
-		/**
-		 * Fetch all of the products we support.
-		 *
-		 * @var \WC_Product[]
-		 */
-		$products = wc_get_products(
-			array(
-				'paged' => $i,
-				'type'  => array_merge( Product::WC_TYPES, Price::WC_TYPES ),
-			)
-		);
+	$result = wc_get_products(
+		array(
+			'type'     => array_merge( Product::WC_TYPES, Price::WC_TYPES ),
+			'paginate' => true,
+		)
+	);
 
-		if ( empty( $products ) ) {
-			break;
-		}
-
-		// Enqueue all of them to be updated.
-		foreach ( $products as $product ) {
-			wc_update_product( $product->get_id(), $product );
-		}
+	for ( $i = 1; $i <= $result->max_num_pages; $i++ ) {
+		flex_product_sync_spawn( $i );
 	}
 }
 
