@@ -23,6 +23,7 @@ $exclude_finder = Finder::create() // @phpstan-ignore class.notFound
 foreach ( $exclude_finder as $file ) {
 	$excluded_files[] = str_replace( __DIR__ . '/', '', $file->getPathname() );
 }
+
 $excluded = array();
 $dirs     = array(
 	__DIR__ . '/../../excludes',
@@ -70,7 +71,7 @@ return array(
 	'exclude-files'      => $excluded_files,
 	'php-version'        => '8.4',
 	'exclude-namespaces' => array(
-		'Symfony\\Polyfill\\*',
+		'Symfony\Polyfill',
 	),
 	'exclude-classes'    => $excluded_classes,
 	'exclude-functions'  => $excluded_functions,
