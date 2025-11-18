@@ -132,6 +132,17 @@ class ResourceTest extends TestCase {
 	}
 
 	/**
+	 * Test edge case with empty string.
+	 *
+	 * This can occur with WooCommerce products that have no regular price set,
+	 * such as free products or gift items. The empty string should be treated
+	 * as a zero-value price (0 cents).
+	 */
+	public function test_empty_string(): void {
+		$this->assertSame( 0, $this->call_currency_to_unit_amount( '' ) );
+	}
+
+	/**
 	 * Test edge cases with small values.
 	 */
 	public function test_small_values(): void {

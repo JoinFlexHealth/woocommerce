@@ -93,8 +93,6 @@ class Price extends Resource implements ResourceInterface {
 			$flex_product = Product::from_wc( $product );
 		}
 
-		$price = $product->get_regular_price();
-
 		/**
 		 * Product Description.
 		 *
@@ -111,7 +109,7 @@ class Price extends Resource implements ResourceInterface {
 			active: $product->get_status() !== ProductStatus::TRASH,
 			description: $description ? trim( $description ) : null,
 			product: $flex_product,
-			unit_amount: $price ? self::currency_to_unit_amount( $price ) : null,
+			unit_amount: self::currency_to_unit_amount( $product->get_regular_price() ),
 			hsa_fsa_eligibility: $product->meta_exists( $meta_prefix . self::KEY_HSA_FSA_ELIGIBILITY ) ? $product->get_meta( $meta_prefix . self::KEY_HSA_FSA_ELIGIBILITY ) : null,
 		);
 
