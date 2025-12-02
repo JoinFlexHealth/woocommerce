@@ -90,7 +90,22 @@ class OrderController extends Controller {
 			$checkout_session->exec( ResourceAction::REFRESH );
 
 			if ( CheckoutSessionStatus::COMPLETE === $checkout_session->status() ) {
-				$order->payment_complete();
+				// The refresh can take a while, and the webhooks are fast, so ensure that we still need to update the order
+				// and it hasn't already been updated by the webhooks.
+				$order = wc_get_order( $id );
+
+				if ( false === $order ) {
+					return new \WP_REST_Response(
+						status: 307,
+						headers: array(
+							'Location' => get_home_url(),
+						),
+					);
+				}
+
+				if ( OrderStatus::PENDING === $order->get_status() ) {
+					$order->payment_complete( $checkout_session->id() );
+				}
 			}
 		}
 
