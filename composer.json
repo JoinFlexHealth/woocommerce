@@ -1,12 +1,13 @@
 {
-  "type": "wordpress-plugin",
+	"type": "wordpress-plugin",
 	"require": {
 		"symfony/polyfill-php84": ">=1.31",
 		"sentry/sentry": ">=4.11"
 	},
 	"require-dev": {
 		"phpunit/phpunit": "^9.6",
-		"yoast/phpunit-polyfills": "^2.0"
+		"yoast/phpunit-polyfills": "^2.0",
+		"wp-phpunit/wp-phpunit": "*"
 	},
 	"autoload": {
 		"psr-4": {
