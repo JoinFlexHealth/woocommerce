@@ -12,7 +12,8 @@
 	"autoload": {
 		"psr-4": {
 			"Flex\\": "src"
-		}
+		},
+		"files": ["includes/functions.php"]
 	},
 	"autoload-dev": {
 		"psr-4": {

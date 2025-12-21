@@ -119,6 +119,38 @@ class Price extends Resource implements ResourceInterface {
 	}
 
 	/**
+	 * Create a price from a WooCommerce Order Line Item.
+	 *
+	 * If the line item price matches the product's catalog price, delegates to from_wc().
+	 * If the line item price differs (due to add-ons, dynamic pricing, etc.), creates
+	 * an ad-hoc price based on the actual line item price.
+	 *
+	 * @param \WC_Order_Item_Product $item The WooCommerce Order Item.
+	 */
+	public static function from_wc_item( \WC_Order_Item_Product $item ): self {
+		$product  = $item->get_product();
+		$quantity = $item->get_quantity();
+
+		// Calculate expected vs actual totals.
+		$expected_total = self::currency_to_unit_amount( $product->get_price() ) * $quantity;
+		$actual_total   = self::currency_to_unit_amount( $item->get_subtotal() );
+
+		$price = self::from_wc( $product );
+
+		// If prices match, use the standard product-based price.
+		if ( $expected_total === $actual_total ) {
+			return $price;
+		}
+
+		return new self(
+			product: $price->product,
+			description: $item->get_name(),
+			unit_amount: $actual_total / $quantity,
+			hsa_fsa_eligibility: $price->hsa_fsa_eligibility,
+		);
+	}
+
+	/**
 	 * Extract price data from an array of data returned by the Flex API.
 	 *
 	 * @param array|string $price The price object returned from the API.
@@ -194,13 +226,9 @@ class Price extends Resource implements ResourceInterface {
 	 * {@inheritdoc}
 	 */
 	public function needs(): ResourceAction {
-		// If the price was not created from WooCommerce, then there is nothing that needs to be done.
-		if ( null === $this->wc ) {
-			return ResourceAction::NONE;
-		}
-
-		if ( ! in_array( $this->wc->get_type(), self::WC_TYPES, true ) ) {
-			return ResourceAction::NONE;
+		// Wait for a product id to be set.
+		if ( null === $this->product->id() ) {
+			return ResourceAction::DEPENDENCY;
 		}
 
 		// If there is no unit amount, there is nothing to be done.
@@ -208,13 +236,19 @@ class Price extends Resource implements ResourceInterface {
 			return ResourceAction::NONE;
 		}
 
-		// Wait for a product id to be set.
-		if ( null === $this->product->id() ) {
-			return ResourceAction::DEPENDENCY;
-		}
-
+		// If no ID, we need to create the price.
 		if ( null === $this->id ) {
 			return ResourceAction::CREATE;
+		}
+
+		// If the price was not created from WooCommerce, there's nothing more to check.
+		if ( null === $this->wc ) {
+			return ResourceAction::NONE;
+		}
+
+		// WooCommerce-specific checks for updates.
+		if ( ! in_array( $this->wc->get_type(), self::WC_TYPES, true ) ) {
+			return ResourceAction::NONE;
 		}
 
 		$meta_prefix = self::meta_prefix();

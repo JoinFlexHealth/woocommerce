@@ -86,7 +86,7 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 	 * @throws FlexResponseException When Flex responds with something other than OK.
 	 * @throws \Throwable If the JSON decoding fails.
 	 */
-	protected static function remote_request( string $path, array $args = array() ): array {
+	protected function remote_request( string $path, array $args = array() ): array {
 		$api_key = self::payment_gateway()->api_key();
 		if ( empty( $api_key ) ) {
 			throw new FlexException( 'API Key is not set' );
@@ -109,6 +109,11 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 		}
 
 		$method = $args['method'] ?? 'GET';
+
+		// Add idempotency key for mutating requests.
+		if ( 'GET' !== $method ) {
+			$headers['Idempotency-Key'] = $this->hash();
+		}
 
 		/**
 		 * The metadata to add to the breadcrumb

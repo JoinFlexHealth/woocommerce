@@ -92,12 +92,12 @@ class LineItem extends Resource {
 	 * @param \WC_Order_Item_Product $item The WooCommerce Order Item.
 	 */
 	public static function from_wc( \WC_Order_Item_Product $item ): self {
-		// If the order has a transaction id associated with it, then the checkout session was completed and the price id
-		// associated with the line item is fixed.
+		// If the order has a transaction id, the checkout session was completed
+		// and the price id is fixed.
 		if ( $item->get_order()->get_transaction_id() && $item->meta_exists( self::META_PREFIX . self::KEY_PRICE ) ) {
 			$price = new Price( id: $item->get_meta( self::META_PREFIX . self::KEY_PRICE ) );
 		} else {
-			$price = Price::from_wc( $item->get_product() );
+			$price = Price::from_wc_item( $item );
 		}
 
 		$line_item = new self(
