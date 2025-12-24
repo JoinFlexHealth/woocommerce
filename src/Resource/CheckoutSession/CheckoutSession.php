@@ -22,8 +22,6 @@ class CheckoutSession extends Resource {
 
 	protected const KEY_STATUS       = 'checkout_session_status';
 	protected const KEY_REDIRECT_URL = 'checkout_session_redirect_url';
-	protected const KEY_HASH         = 'checkout_session_hash';
-	protected const KEY_AMOUNT_TOTAL = 'checkout_session_amount_total';
 	protected const KEY_TEST_MODE    = 'checkout_session_test_mode';
 
 	/**
@@ -288,18 +286,11 @@ class CheckoutSession extends Resource {
 	 */
 	public function apply_to( \WC_Order $order ): void {
 		$order->set_transaction_id( $this->id ?? '' );
-		$order->update_meta_data( self::META_PREFIX . self::KEY_HASH, $this->hash() );
 
 		if ( null === $this->redirect_url ) {
 			$order->delete_meta_data( self::META_PREFIX . self::KEY_REDIRECT_URL );
 		} else {
 			$order->update_meta_data( self::META_PREFIX . self::KEY_REDIRECT_URL, $this->redirect_url );
-		}
-
-		if ( null === $this->amount_total ) {
-			$order->delete_meta_data( self::META_PREFIX . self::KEY_AMOUNT_TOTAL );
-		} else {
-			$order->update_meta_data( self::META_PREFIX . self::KEY_AMOUNT_TOTAL, strval( $this->amount_total ) );
 		}
 
 		$status = $this->status?->value;
@@ -329,19 +320,11 @@ class CheckoutSession extends Resource {
 			return ResourceAction::DEPENDENCY;
 		}
 
-		if ( null === $this->id ) {
-			return ResourceAction::CREATE;
+		if ( Status::COMPLETE === $this->status ) {
+			return ResourceAction::NONE;
 		}
 
-		if ( intval( $this->wc->get_meta( self::META_PREFIX . self::KEY_AMOUNT_TOTAL ) ) !== $this->amount_total ) {
-			return ResourceAction::CREATE;
-		}
-
-		if ( $this->wc->get_meta( self::META_PREFIX . self::KEY_HASH ) !== $this->hash() ) {
-			return ResourceAction::CREATE;
-		}
-
-		return ResourceAction::NONE;
+		return ResourceAction::CREATE;
 	}
 
 	/**

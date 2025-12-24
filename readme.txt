@@ -55,8 +55,9 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 
 == Changelog ==
 
-= 3.1.18 =
+= 3.2.0 =
 * Added support for dynamic pricing.
+* Removed checkout session cache since idempotency system will prevent duplicate checkout sessions from being created.
 
 = 3.1.17 =
 * Fixed a race condition where an order could be marked as `payment_complete` multiple times, once by the redirect and again by the webhook.
