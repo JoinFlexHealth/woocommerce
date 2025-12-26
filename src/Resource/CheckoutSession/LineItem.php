@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 namespace Flex\Resource\CheckoutSession;
 
+use Automattic\WooCommerce\Enums\OrderStatus;
 use Flex\Resource\Price;
 use Flex\Resource\Resource;
 use Flex\Resource\ResourceAction;
@@ -92,16 +93,17 @@ class LineItem extends Resource {
 	 * @param \WC_Order_Item_Product $item The WooCommerce Order Item.
 	 */
 	public static function from_wc( \WC_Order_Item_Product $item ): self {
-		// If the order has a transaction id, the checkout session was completed
-		// and the price id is fixed.
-		if ( $item->get_order()->get_transaction_id() && $item->meta_exists( self::META_PREFIX . self::KEY_PRICE ) ) {
-			$price = new Price( id: $item->get_meta( self::META_PREFIX . self::KEY_PRICE ) );
-		} else {
-			$price = Price::from_wc_item( $item );
+		// For non-pending orders with stored metadata, pass the stored price ID.
+		// This ensures refunds reference the correct price.
+		$stored_id = null;
+		$meta_key  = self::META_PREFIX . self::KEY_PRICE;
+		if ( OrderStatus::PENDING !== $item->get_order()->get_status()
+			&& $item->meta_exists( $meta_key ) ) {
+			$stored_id = $item->get_meta( $meta_key );
 		}
 
 		$line_item = new self(
-			price: $price,
+			price: Price::from_wc_item( $item, $stored_id ),
 			quantity: $item->get_quantity(),
 		);
 
@@ -190,7 +192,7 @@ class LineItem extends Resource {
 	 */
 	public static function wc_attribute_label( string $label, string $name ): string {
 		return match ( $name ) {
-			self::META_PREFIX . self::KEY_PRICE      => __( 'Flex Price ID', 'pay-with-flex' ),
+			self::META_PREFIX . self::KEY_PRICE => __( 'Flex Price ID', 'pay-with-flex' ),
 			default => $label,
 		};
 	}

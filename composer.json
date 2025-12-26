@@ -1,6 +1,7 @@
 {
 	"type": "wordpress-plugin",
 	"require": {
+		"php": ">=8.1",
 		"symfony/polyfill-php84": ">=1.31",
 		"sentry/sentry": ">=4.11"
 	},
@@ -13,7 +14,9 @@
 		"psr-4": {
 			"Flex\\": "src"
 		},
-		"files": ["includes/functions.php"]
+		"files": [
+			"includes/functions.php"
+		]
 	},
 	"autoload-dev": {
 		"psr-4": {
@@ -24,6 +27,9 @@
 		"test": "phpunit"
 	},
 	"config": {
-		"optimize-autoloader": true
+		"optimize-autoloader": true,
+		"platform": {
+			"php": "8.1.34"
+		}
 	}
 }

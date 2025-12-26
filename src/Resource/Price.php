@@ -126,8 +126,9 @@ class Price extends Resource implements ResourceInterface {
 	 * an ad-hoc price based on the actual line item price.
 	 *
 	 * @param \WC_Order_Item_Product $item The WooCommerce Order Item.
+	 * @param ?string                $id   Optional price ID from stored metadata.
 	 */
-	public static function from_wc_item( \WC_Order_Item_Product $item ): self {
+	public static function from_wc_item( \WC_Order_Item_Product $item, ?string $id = null ): self {
 		$product  = $item->get_product();
 		$quantity = $item->get_quantity();
 
@@ -137,6 +138,11 @@ class Price extends Resource implements ResourceInterface {
 
 		$price = self::from_wc( $product );
 
+		// Use the provided ID if present (from stored metadata).
+		if ( null !== $id ) {
+			$price->id = $id;
+		}
+
 		// If prices match, use the standard product-based price.
 		if ( $expected_total === $actual_total ) {
 			return $price;
@@ -144,6 +150,7 @@ class Price extends Resource implements ResourceInterface {
 
 		return new self(
 			product: $price->product,
+			id: $price->id,  // Preserve stored ID if present.
 			description: $item->get_name(),
 			unit_amount: $actual_total / $quantity,
 			hsa_fsa_eligibility: $price->hsa_fsa_eligibility,
