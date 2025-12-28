@@ -1,6 +1,6 @@
 <?php
 /**
- * Flex Checkout Session Line Item
+ * Flex Checkout Session Tax Rate
  *
  * @package Flex
  */

@@ -46,6 +46,13 @@ class CheckoutSession extends Resource {
 	protected array $discounts;
 
 	/**
+	 * Fees
+	 *
+	 * @var Fee[]
+	 */
+	protected array $fees;
+
+	/**
 	 * Creates a checkout session.
 	 *
 	 * @param string            $success_url The url to redirect users back too upon success.
@@ -62,6 +69,7 @@ class CheckoutSession extends Resource {
 	 * @param ?TaxRate          $tax_rate The tax if there is one.
 	 * @param ?string           $cancel_url The url to use to cancel the checkout session.
 	 * @param ?Discount[]       $discounts The discounts to apply to the checkout session.
+	 * @param ?Fee[]            $fees The fees to apply to the checkout session.
 	 * @throws \LogicException If the line_items or discounts contain something other than their respective types.
 	 */
 	public function __construct(
@@ -79,6 +87,7 @@ class CheckoutSession extends Resource {
 		protected ?TaxRate $tax_rate = null,
 		protected ?string $cancel_url = null,
 		?array $discounts = null,
+		?array $fees = null,
 	) {
 		if ( ! array_all( $line_items, fn ( $item ) => $item instanceof LineItem ) ) {
 			throw new \LogicException( 'CheckoutSession::$line_items may only contain instances of LineItem' );
@@ -90,6 +99,12 @@ class CheckoutSession extends Resource {
 		}
 
 		$this->discounts = $discounts ?? array();
+
+		if ( ! empty( $fees ) && ! array_all( $fees, fn ( $item ) => $item instanceof Fee ) ) {
+			throw new \LogicException( 'CheckoutSession::$fees may only contain instances of Fee' );
+		}
+
+		$this->fees = $fees ?? array();
 	}
 
 	/**
@@ -152,6 +167,10 @@ class CheckoutSession extends Resource {
 
 		if ( ! empty( $this->discounts ) ) {
 			$data['discounts'] = $this->discounts;
+		}
+
+		if ( ! empty( $this->fees ) ) {
+			$data['fees'] = $this->fees;
 		}
 
 		return $data;
@@ -237,6 +256,8 @@ class CheckoutSession extends Resource {
 			}
 		}
 
+		$fees = array_map( static fn( $f ) => Fee::from_wc( $f ), array_values( $order->get_fees() ) );
+
 		$checkout_session = new self(
 			success_url: $success_url,
 			defaults: CustomerDefaults::from_wc( $order ),
@@ -252,6 +273,7 @@ class CheckoutSession extends Resource {
 			tax_rate: $tax_rate->amount() > 0 ? $tax_rate : null,
 			cancel_url: wc_get_checkout_url(),
 			discounts: $discounts,
+			fees: $fees,
 		);
 
 		$checkout_session->wc = $order;
@@ -364,6 +386,7 @@ class CheckoutSession extends Resource {
 		$this->shipping_options    = isset( $checkout_session['shipping_options'] ) ? ShippingOptions::from_flex( $checkout_session['shipping_options'] ) : $this->shipping_options;
 		$this->tax_rate            = isset( $checkout_session['tax_rate'] ) ? TaxRate::from_flex( $checkout_session['tax_rate'] ) : $this->tax_rate;
 		$this->cancel_url          = $checkout_session['cancel_url'] ?? $this->cancel_url;
+		$this->fees                = isset( $checkout_session['fees'] ) && is_array( $checkout_session['fees'] ) ? array_map( static fn ( $f ) => Fee::from_flex( $f ), $checkout_session['fees'] ) : array();
 	}
 
 	/**
