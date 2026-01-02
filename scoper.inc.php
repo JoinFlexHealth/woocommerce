@@ -69,7 +69,7 @@ return array(
 	'prefix'             => 'Flex',
 	'output-dir'         => '../../build/pay-with-flex',
 	'exclude-files'      => $excluded_files,
-	'php-version'        => '8.4',
+	'php-version'        => '8.1',
 	'exclude-namespaces' => array(
 		'Symfony\Polyfill',
 	),

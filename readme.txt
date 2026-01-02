@@ -57,6 +57,7 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 
 = 3.3.1 =
 * Fixed a bug that prevented dynamic pricing from working correctly.
+* Fixed a PHP compatibility issue that could prevent the plugin from activating on PHP 8.1-8.3.
 
 = 3.3.0 =
 * Added support for custom fees.
