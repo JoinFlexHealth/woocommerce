@@ -144,4 +144,110 @@ class PriceTest extends \WP_UnitTestCase {
 		$json = $price->jsonSerialize();
 		$this->assertSame( 2500, $json['unit_amount'] );
 	}
+
+	/**
+	 * Test that dynamic pricing does not inherit the product's stored price ID.
+	 *
+	 * When a line item has a different amount than the catalog price (e.g., add-ons),
+	 * and no ID is passed, the ad-hoc price should NOT use the product's stored ID.
+	 * This ensures new checkout sessions create fresh prices in Flex.
+	 */
+	public function test_from_wc_item_different_price_does_not_use_product_price_id(): void {
+		// Create a product with a stored price ID (simulating synced product).
+		$product = new \WC_Product_Simple();
+		$product->set_name( 'Test Product' );
+		$product->set_regular_price( '100.00' );
+		$product->update_meta_data( '_wc_flex_price_id', 'fprice_catalog_123' );
+		$product->save();
+
+		// Create order with dynamic pricing (add-on makes it $125).
+		$order   = wc_create_order();
+		$item_id = $order->add_product( $product, 1 );
+		$order->save();
+
+		$item = $order->get_item( $item_id );
+		$item->set_subtotal( '125.00' );
+		$item->save();
+
+		// Create price WITHOUT passing an ID (new order scenario).
+		$price = Price::from_wc_item( $item );
+
+		// The price should NOT have the product's stored ID.
+		$this->assertNull( $price->id(), 'Dynamic pricing should not inherit product price ID for new orders' );
+
+		// But should have the correct amount.
+		$json = $price->jsonSerialize();
+		$this->assertSame( 12500, $json['unit_amount'] );
+	}
+
+	/**
+	 * Test that dynamic pricing preserves stored ID for refunds.
+	 *
+	 * When processing a refund (non-pending order with stored ID),
+	 * the ad-hoc price should preserve the stored ID for Flex reference.
+	 */
+	public function test_from_wc_item_different_price_preserves_passed_id_for_refunds(): void {
+		// Create a product.
+		$product = new \WC_Product_Simple();
+		$product->set_name( 'Refund Test Product' );
+		$product->set_regular_price( '100.00' );
+		$product->update_meta_data( '_wc_flex_price_id', 'fprice_catalog_456' );
+		$product->save();
+
+		// Create order with dynamic pricing.
+		$order   = wc_create_order();
+		$item_id = $order->add_product( $product, 1 );
+		$order->save();
+
+		$item = $order->get_item( $item_id );
+		$item->set_subtotal( '125.00' );
+		$item->save();
+
+		// Create price WITH a stored ID (refund scenario).
+		$stored_id = 'fprice_stored_at_checkout_789';
+		$price     = Price::from_wc_item( $item, $stored_id );
+
+		// The price should have the stored ID (not product's ID).
+		$this->assertSame( $stored_id, $price->id(), 'Dynamic pricing should preserve stored ID for refunds' );
+
+		// And the correct amount.
+		$json = $price->jsonSerialize();
+		$this->assertSame( 12500, $json['unit_amount'] );
+	}
+
+	/**
+	 * Test that matching amounts still use passed ID for refunds, not product's ID.
+	 *
+	 * Even when the line item amount matches the catalog price, refunds should
+	 * use the stored ID from checkout - the product's price ID may have changed
+	 * in Flex since the original purchase.
+	 */
+	public function test_from_wc_item_matching_price_uses_passed_id_for_refunds(): void {
+		// Create a product with a stored price ID.
+		$product = new \WC_Product_Simple();
+		$product->set_name( 'Matching Price Refund Product' );
+		$product->set_regular_price( '100.00' );
+		// Simulate product's current price ID (different from the one stored at checkout).
+		$product->update_meta_data( '_wc_flex_price_id', 'fprice_current_product_id' );
+		$product->save();
+
+		// Create order with matching price (no add-ons).
+		$order   = wc_create_order();
+		$item_id = $order->add_product( $product, 1 );
+		$order->save();
+
+		$item = $order->get_item( $item_id );
+
+		// Create price WITH a stored ID from the original checkout.
+		// This simulates a refund where the product's price ID has changed since purchase.
+		$stored_id = 'fprice_original_checkout_id';
+		$price     = Price::from_wc_item( $item, $stored_id );
+
+		// The price should use the stored ID, NOT the product's current ID.
+		$this->assertSame( $stored_id, $price->id(), 'Matching price refunds must use stored ID, not product ID' );
+
+		// Amount should still be correct.
+		$json = $price->jsonSerialize();
+		$this->assertSame( 10000, $json['unit_amount'] );
+	}
 }

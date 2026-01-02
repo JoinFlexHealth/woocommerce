@@ -138,19 +138,14 @@ class Price extends Resource implements ResourceInterface {
 
 		$price = self::from_wc( $product );
 
-		// Use the provided ID if present (from stored metadata).
-		if ( null !== $id ) {
-			$price->id = $id;
-		}
-
 		// If prices match, use the standard product-based price.
-		if ( $expected_total === $actual_total ) {
+		if ( $expected_total === $actual_total && ( null === $id || $price->id === $id ) ) {
 			return $price;
 		}
 
 		return new self(
 			product: $price->product,
-			id: $price->id,  // Preserve stored ID if present.
+			id: $id,  // Only use explicitly passed ID (null for new orders, stored ID for refunds).
 			description: $item->get_name(),
 			unit_amount: $actual_total / $quantity,
 			hsa_fsa_eligibility: $price->hsa_fsa_eligibility,
