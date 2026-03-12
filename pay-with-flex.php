@@ -2,7 +2,7 @@
 /**
  * Plugin Name:      Flex HSA/FSA Payments
  * Description:      Accept HSA/FSA payments directly in the checkout flow.
- * Version:          3.3.2
+ * Version:          3.3.3
  * Plugin URI:       https://wordpress.org/plugins/pay-with-flex/
  * Author:           Flex
  * Author URI:       https://withflex.com/
@@ -38,6 +38,7 @@ use Sentry\Integration\RequestFetcher;
 use Sentry\Severity;
 use Sentry\State\Hub;
 use Sentry\State\HubInterface;
+use Sentry\Breadcrumb;
 use Sentry\State\Scope;
 use Sentry\Util\PHPVersion;
 
@@ -313,6 +314,64 @@ register_deactivation_hook(
 function flex_enqueue_async_action( string $hook, array $args = array(), string $group = '', int $retries = 0 ): void {
 	// After 10 retries, something is seriously wrong.
 	if ( $retries >= 10 ) {
+		// Look up previous runs for this scheduled job and add them as breadcrumbs.
+		$query_args = array(
+			'hook'     => $hook,
+			'status'   => 'failed',
+			'per_page' => 10,
+			'orderby'  => 'date',
+			'order'    => 'DESC',
+		);
+		if ( ! empty( $group ) ) {
+			$query_args['group'] = $group;
+		}
+		$previous_actions = as_get_scheduled_actions( $query_args );
+
+		foreach ( $previous_actions as $action_id => $action ) {
+			$scheduled = $action->get_schedule()?->get_date();
+
+			sentry()->addBreadcrumb(
+				new Breadcrumb(
+					level: Breadcrumb::LEVEL_ERROR,
+					type: Breadcrumb::TYPE_DEFAULT,
+					category: 'action_scheduler',
+					message: "Failed action $action_id",
+					metadata: array(
+						'action_id'    => $action_id,
+						'hook'         => $action->get_hook(),
+						'status'       => 'failed',
+						'scheduled_at' => $scheduled ? $scheduled->format( 'c' ) : null,
+						'args'         => $action->get_args(),
+					),
+				)
+			);
+		}
+
+		sentry()->configureScope(
+			function ( Scope $scope ) use ( $hook, $group, $args, $retries ) {
+				$scope->setTag( 'async_action.hook', $hook );
+
+				if ( ! empty( $group ) ) {
+					$scope->setTag( 'async_action.group', $group );
+				}
+
+				$scope->setContext(
+					'async_action',
+					array(
+						'hook'    => $hook,
+						'group'   => $group,
+						'args'    => $args,
+						'retries' => $retries,
+					)
+				);
+			}
+		);
+
+		sentry()->captureMessage(
+			message: "Async action exhausted retries: $hook",
+			level: Severity::error(),
+		);
+
 		return;
 	}
 
