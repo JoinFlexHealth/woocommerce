@@ -85,6 +85,7 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	 */
 	public function init(): void {
 		$this->title              = __( 'Flex | Pay with HSA/FSA', 'pay-with-flex' );
+		$this->description        = __( 'Accept HSA/FSA payments directly in the checkout flow.', 'pay-with-flex' );
 		$this->method_title       = __( 'Flex', 'pay-with-flex' );
 		$this->method_description = __( 'Accept HSA/FSA payments directly in the checkout flow.', 'pay-with-flex' );
 		$this->init_form_fields();
