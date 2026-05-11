@@ -17,9 +17,9 @@ class FlexResponseException extends FlexException {
 	/**
 	 * {@inheritdoc}
 	 *
-	 * @param array       $response The response from wp_remote_request.
-	 * @param string      $message The error message.
-	 * @param ?\Throwable $previous The previous error message that should be chained.
+	 * @param array<string, mixed> $response The response from wp_remote_request.
+	 * @param string               $message  The error message.
+	 * @param ?\Throwable          $previous The previous error message that should be chained.
 	 */
 	public function __construct(
 		protected array $response,
@@ -41,6 +41,8 @@ class FlexResponseException extends FlexException {
 
 	/**
 	 * {@inheritdoc}
+	 *
+	 * @return array<string, mixed>
 	 */
 	public function getContext(): array {
 		return $this->response;

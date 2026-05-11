@@ -32,27 +32,6 @@ class CheckoutSession extends Resource {
 	protected ?\WC_Order $wc = null;
 
 	/**
-	 * Line Items
-	 *
-	 * @var LineItem[]
-	 */
-	protected array $line_items;
-
-	/**
-	 * Discounts
-	 *
-	 * @var Discount[]
-	 */
-	protected array $discounts;
-
-	/**
-	 * Fees
-	 *
-	 * @var Fee[]
-	 */
-	protected array $fees;
-
-	/**
 	 * Creates a checkout session.
 	 *
 	 * @param string            $success_url The url to redirect users back too upon success.
@@ -68,15 +47,14 @@ class CheckoutSession extends Resource {
 	 * @param ?ShippingOptions  $shipping_options The shipping options if there are any.
 	 * @param ?TaxRate          $tax_rate The tax if there is one.
 	 * @param ?string           $cancel_url The url to use to cancel the checkout session.
-	 * @param ?Discount[]       $discounts The discounts to apply to the checkout session.
-	 * @param ?Fee[]            $fees The fees to apply to the checkout session.
-	 * @throws \LogicException If the line_items or discounts contain something other than their respective types.
+	 * @param Discount[]        $discounts The discounts to apply to the checkout session.
+	 * @param Fee[]             $fees The fees to apply to the checkout session.
 	 */
 	public function __construct(
 		protected string $success_url,
 		protected ?CustomerDefaults $defaults = null,
 		protected ?string $redirect_url = null,
-		array $line_items = array(),
+		protected array $line_items = array(),
 		protected ?string $id = null,
 		protected ?string $client_reference_id = null,
 		protected ?int $amount_total = null,
@@ -86,25 +64,9 @@ class CheckoutSession extends Resource {
 		protected ?ShippingOptions $shipping_options = null,
 		protected ?TaxRate $tax_rate = null,
 		protected ?string $cancel_url = null,
-		?array $discounts = null,
-		?array $fees = null,
+		protected array $discounts = array(),
+		protected array $fees = array(),
 	) {
-		if ( ! array_all( $line_items, fn ( $item ) => $item instanceof LineItem ) ) {
-			throw new \LogicException( 'CheckoutSession::$line_items may only contain instances of LineItem' );
-		}
-		$this->line_items = $line_items;
-
-		if ( ! empty( $discounts ) && ! array_all( $discounts, fn ( $item ) => $item instanceof Discount ) ) {
-			throw new \LogicException( 'CheckoutSession::$discounts may only contain instances of Discount' );
-		}
-
-		$this->discounts = $discounts ?? array();
-
-		if ( ! empty( $fees ) && ! array_all( $fees, fn ( $item ) => $item instanceof Fee ) ) {
-			throw new \LogicException( 'CheckoutSession::$fees may only contain instances of Fee' );
-		}
-
-		$this->fees = $fees ?? array();
 	}
 
 	/**
@@ -146,6 +108,19 @@ class CheckoutSession extends Resource {
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
+	 *
+	 * @return array{
+	 *     defaults: ?CustomerDefaults,
+	 *     success_url: string,
+	 *     line_items: LineItem[],
+	 *     client_reference_id: ?string,
+	 *     mode?: string,
+	 *     cancel_url: ?string,
+	 *     shipping_options?: ShippingOptions,
+	 *     tax_rate?: TaxRate,
+	 *     discounts?: Discount[],
+	 *     fees?: Fee[],
+	 * }
 	 */
 	public function jsonSerialize(): array {
 		$data = array(
@@ -153,9 +128,13 @@ class CheckoutSession extends Resource {
 			'success_url'         => $this->success_url,
 			'line_items'          => $this->line_items,
 			'client_reference_id' => $this->client_reference_id,
-			'mode'                => $this->mode->value,
 			'cancel_url'          => $this->cancel_url,
 		);
+
+		$mode = $this->mode?->value;
+		if ( null !== $mode ) {
+			$data['mode'] = $mode;
+		}
 
 		if ( null !== $this->shipping_options ) {
 			$data['shipping_options'] = $this->shipping_options;
@@ -165,11 +144,11 @@ class CheckoutSession extends Resource {
 			$data['tax_rate'] = $this->tax_rate;
 		}
 
-		if ( ! empty( $this->discounts ) ) {
+		if ( array() !== $this->discounts ) {
 			$data['discounts'] = $this->discounts;
 		}
 
-		if ( ! empty( $this->fees ) ) {
+		if ( array() !== $this->fees ) {
 			$data['fees'] = $this->fees;
 		}
 
@@ -193,7 +172,8 @@ class CheckoutSession extends Resource {
 		);
 
 		// A map of item_id => LineItem.
-		$line_items = array_map( static fn( $item ) => LineItem::from_wc( $item ), $order->get_items() );
+		$product_items = array_filter( $order->get_items(), static fn( $item ) => $item instanceof \WC_Order_Item_Product );
+		$line_items    = array_map( static fn( \WC_Order_Item_Product $item ) => LineItem::from_wc( $item ), $product_items );
 
 		$tax_rate = TaxRate::from_wc( $order );
 
@@ -208,7 +188,13 @@ class CheckoutSession extends Resource {
 		// Group the discounts by the code → amount → line item
 		// If the discount is spread evenly across line items, we can share the discount in Flex.
 		$discounts_grouped = array();
-		foreach ( $wc_discounts->get_discounts() as $code => $items ) {
+		/**
+		 * Discount amounts grouped by coupon code and line item.
+		 *
+		 * @var array<string, array<string|int, float|string>> $wc_discount_items
+		 */
+		$wc_discount_items = $wc_discounts->get_discounts();
+		foreach ( $wc_discount_items as $code => $items ) {
 			foreach ( $items as $item_id => $amount ) {
 				$discounts_grouped[ $code ][ self::currency_to_unit_amount( $amount ) ][] = $item_id;
 			}
@@ -218,7 +204,7 @@ class CheckoutSession extends Resource {
 		foreach ( $discounts_grouped as $code => $group ) {
 			foreach ( $group as $per_item_amount => $item_ids ) {
 				$amount_off = $per_item_amount * count( $item_ids );
-				if ( empty( $amount_off ) ) {
+				if ( 0 === $amount_off ) {
 					continue;
 				}
 
@@ -226,7 +212,7 @@ class CheckoutSession extends Resource {
 					new Coupon(
 						name: $code,
 						amount_off: $amount_off,
-						applies_to: array_map( static fn( $item_id ) => $line_items[ $item_id ]->price(), $item_ids ),
+						applies_to: array_map( static fn( string|int $item_id ) => $line_items[ $item_id ]->price(), $item_ids ),
 					)
 				);
 			}
@@ -239,12 +225,12 @@ class CheckoutSession extends Resource {
 			}
 
 			$product = $item->get_product();
-			if ( $product->get_price() !== $product->get_sale_price() ) {
+			if ( ! $product instanceof \WC_Product || $product->get_price() !== $product->get_sale_price() ) {
 				continue;
 			}
 
 			$coupon = Coupon::from_wc( $product );
-			if ( empty( $coupon->amount_off() ) ) {
+			if ( null === $coupon->amount_off() || 0 === $coupon->amount_off() ) {
 				continue;
 			}
 
@@ -258,18 +244,22 @@ class CheckoutSession extends Resource {
 
 		$fees = array_map( static fn( $f ) => Fee::from_wc( $f ), array_values( $order->get_fees() ) );
 
+		$redirect_meta  = $order->get_meta( self::META_PREFIX . self::KEY_REDIRECT_URL );
+		$status_meta    = $order->get_meta( self::META_PREFIX . self::KEY_STATUS );
+		$test_mode_meta = $order->get_meta( self::META_PREFIX . self::KEY_TEST_MODE );
+
 		$checkout_session = new self(
 			success_url: $success_url,
 			defaults: CustomerDefaults::from_wc( $order ),
-			redirect_url: $order->meta_exists( self::META_PREFIX . self::KEY_REDIRECT_URL ) ? $order->get_meta( self::META_PREFIX . self::KEY_REDIRECT_URL ) : null,
-			id: $id ? $id : null,
+			redirect_url: $order->meta_exists( self::META_PREFIX . self::KEY_REDIRECT_URL ) && is_string( $redirect_meta ) ? $redirect_meta : null,
+			id: '' !== $id ? $id : null,
 			client_reference_id: (string) $order->get_id(),
-			status: Status::tryFrom( $order->get_meta( self::META_PREFIX . self::KEY_STATUS ) ),
+			status: is_string( $status_meta ) ? Status::tryFrom( $status_meta ) : null,
 			mode: Mode::PAYMENT,
 			line_items: array_values( $line_items ),
 			amount_total: self::currency_to_unit_amount( $order->get_total() ),
-			test_mode: $order->meta_exists( self::META_PREFIX . self::KEY_TEST_MODE ) ? wc_string_to_bool( $order->get_meta( self::META_PREFIX . self::KEY_TEST_MODE ) ) : self::payment_gateway()->is_in_test_mode(),
-			shipping_options: ! empty( $order->get_shipping_methods() ) ? ShippingOptions::from_wc( $order ) : null,
+			test_mode: $order->meta_exists( self::META_PREFIX . self::KEY_TEST_MODE ) && is_string( $test_mode_meta ) ? wc_string_to_bool( $test_mode_meta ) : self::payment_gateway()->is_in_test_mode(),
+			shipping_options: array() !== $order->get_shipping_methods() ? ShippingOptions::from_wc( $order ) : null,
 			tax_rate: $tax_rate->amount() > 0 ? $tax_rate : null,
 			cancel_url: wc_get_checkout_url(),
 			discounts: $discounts,
@@ -292,7 +282,7 @@ class CheckoutSession extends Resource {
 				)
 			);
 
-			if ( ! empty( $orders ) ) {
+			if ( is_array( $orders ) && array() !== $orders ) {
 				$this->wc = array_shift( $orders );
 			}
 		}
@@ -319,7 +309,7 @@ class CheckoutSession extends Resource {
 		if ( null === $status ) {
 			$order->delete_meta_data( self::META_PREFIX . self::KEY_STATUS );
 		} else {
-			$order->update_meta_data( self::META_PREFIX . self::KEY_STATUS, $status, true );
+			$order->update_meta_data( self::META_PREFIX . self::KEY_STATUS, $status );
 		}
 
 		if ( null === $this->test_mode ) {
@@ -352,12 +342,12 @@ class CheckoutSession extends Resource {
 	/**
 	 * Extract the values from a checkout session API response.
 	 *
-	 * @param array $checkout_session The checkout session object returned from the API.
+	 * @param array<string, mixed> $checkout_session The checkout session object returned from the API.
 	 *
 	 * @throws FlexException If data is missing.
 	 */
 	public static function from_flex( array $checkout_session ): self {
-		if ( ! isset( $checkout_session['success_url'] ) ) {
+		if ( ! isset( $checkout_session['success_url'] ) || ! is_string( $checkout_session['success_url'] ) ) {
 			throw new FlexException( 'Success URL missing from checkout session.' );
 		}
 
@@ -369,24 +359,66 @@ class CheckoutSession extends Resource {
 	/**
 	 * Extract the values from a checkout session API response.
 	 *
-	 * @param array $checkout_session The checkout session object returned from the API.
+	 * @param array<string, mixed> $checkout_session The checkout session object returned from the API.
 	 *
 	 * @throws \Exception If data is missing.
 	 */
 	protected function extract( array $checkout_session ): void {
-		$this->id                  = $checkout_session['checkout_session_id'] ?? $this->id;
-		$this->defaults            = isset( $checkout_session['defaults'] ) ? CustomerDefaults::from_flex( $checkout_session['defaults'] ) : $this->defaults;
-		$this->success_url         = $checkout_session['success_url'] ?? $this->success_url;
-		$this->redirect_url        = $checkout_session['redirect_url'] ?? $this->redirect_url;
-		$this->client_reference_id = $checkout_session['client_reference_id'] ?? $this->client_reference_id;
-		$this->amount_total        = $checkout_session['amount_total'] ?? $this->amount_total;
-		$this->mode                = Mode::tryFrom( $checkout_session['mode'] ?? '' ) ?? $this->mode;
-		$this->status              = Status::tryFrom( $checkout_session['status'] ?? '' ) ?? $this->status;
-		$this->test_mode           = $checkout_session['test_mode'] ?? $this->test_mode;
-		$this->shipping_options    = isset( $checkout_session['shipping_options'] ) ? ShippingOptions::from_flex( $checkout_session['shipping_options'] ) : $this->shipping_options;
-		$this->tax_rate            = isset( $checkout_session['tax_rate'] ) ? TaxRate::from_flex( $checkout_session['tax_rate'] ) : $this->tax_rate;
-		$this->cancel_url          = $checkout_session['cancel_url'] ?? $this->cancel_url;
-		$this->fees                = isset( $checkout_session['fees'] ) && is_array( $checkout_session['fees'] ) ? array_map( static fn ( $f ) => Fee::from_flex( $f ), $checkout_session['fees'] ) : array();
+		$this->id                  = isset( $checkout_session['checkout_session_id'] ) && is_string( $checkout_session['checkout_session_id'] ) ? $checkout_session['checkout_session_id'] : $this->id;
+		$this->success_url         = isset( $checkout_session['success_url'] ) && is_string( $checkout_session['success_url'] ) ? $checkout_session['success_url'] : $this->success_url;
+		$this->redirect_url        = isset( $checkout_session['redirect_url'] ) && is_string( $checkout_session['redirect_url'] ) ? $checkout_session['redirect_url'] : $this->redirect_url;
+		$this->client_reference_id = isset( $checkout_session['client_reference_id'] ) && is_string( $checkout_session['client_reference_id'] ) ? $checkout_session['client_reference_id'] : $this->client_reference_id;
+		$this->amount_total        = isset( $checkout_session['amount_total'] ) && is_int( $checkout_session['amount_total'] ) ? $checkout_session['amount_total'] : $this->amount_total;
+		$this->test_mode           = isset( $checkout_session['test_mode'] ) && is_bool( $checkout_session['test_mode'] ) ? $checkout_session['test_mode'] : $this->test_mode;
+		$this->cancel_url          = isset( $checkout_session['cancel_url'] ) && is_string( $checkout_session['cancel_url'] ) ? $checkout_session['cancel_url'] : $this->cancel_url;
+
+		$mode       = $checkout_session['mode'] ?? '';
+		$this->mode = is_string( $mode ) ? ( Mode::tryFrom( $mode ) ?? $this->mode ) : $this->mode;
+
+		$status       = $checkout_session['status'] ?? '';
+		$this->status = is_string( $status ) ? ( Status::tryFrom( $status ) ?? $this->status ) : $this->status;
+
+		if ( isset( $checkout_session['defaults'] ) && is_array( $checkout_session['defaults'] ) ) {
+			/**
+			 * Customer defaults data.
+			 *
+			 * @var array<string, mixed> $defaults_data
+			 */
+			$defaults_data  = $checkout_session['defaults'];
+			$this->defaults = CustomerDefaults::from_flex( $defaults_data );
+		}
+
+		if ( isset( $checkout_session['shipping_options'] ) && is_array( $checkout_session['shipping_options'] ) ) {
+			/**
+			 * Shipping options data.
+			 *
+			 * @var array<string, mixed> $shipping_data
+			 */
+			$shipping_data          = $checkout_session['shipping_options'];
+			$this->shipping_options = ShippingOptions::from_flex( $shipping_data );
+		}
+
+		if ( isset( $checkout_session['tax_rate'] ) && is_array( $checkout_session['tax_rate'] ) ) {
+			/**
+			 * Tax rate data.
+			 *
+			 * @var array<string, mixed> $tax_data
+			 */
+			$tax_data       = $checkout_session['tax_rate'];
+			$this->tax_rate = TaxRate::from_flex( $tax_data );
+		}
+
+		if ( isset( $checkout_session['fees'] ) && is_array( $checkout_session['fees'] ) ) {
+			/**
+			 * Fee line items data.
+			 *
+			 * @var list<array<string, mixed>> $fees_data
+			 */
+			$fees_data  = $checkout_session['fees'];
+			$this->fees = array_map( static fn ( array $f ) => Fee::from_flex( $f ), $fees_data );
+		} else {
+			$this->fees = array();
+		}
 	}
 
 	/**
@@ -432,25 +464,31 @@ class CheckoutSession extends Resource {
 		$data = $this->remote_request(
 			match ( $action ) {
 				ResourceAction::CREATE => '/v1/checkout/sessions',
-				ResourceAction::REFRESH => '/v1/checkout/sessions/' . $this->id,
+				default => '/v1/checkout/sessions/' . $this->id,
 			},
 			array(
 				'method' => match ( $action ) {
 					ResourceAction::CREATE => 'POST',
-					ResourceAction::REFRESH => 'GET',
+					default => 'GET',
 				},
 				'flex'   => match ( $action ) {
 					ResourceAction::CREATE => array( 'data' => array( 'checkout_session' => $this ) ),
-					ResourceAction::REFRESH => array(),
+					default => array(),
 				},
 			),
 		);
 
-		if ( ! isset( $data['checkout_session'] ) ) {
+		if ( ! isset( $data['checkout_session'] ) || ! is_array( $data['checkout_session'] ) ) {
 			throw new FlexException( 'Missing checkout_session in response.' );
 		}
 
-		$this->extract( $data['checkout_session'] );
+		/**
+		 * The checkout session data from the API response.
+		 *
+		 * @var array<string, mixed> $cs_data
+		 */
+		$cs_data = $data['checkout_session'];
+		$this->extract( $cs_data );
 
 		if ( null !== $this->wc ) {
 			$this->apply_to( $this->wc );
@@ -459,7 +497,7 @@ class CheckoutSession extends Resource {
 				$line_item->apply();
 			}
 
-			$this->wc->save();
+			$this->wc?->save();
 		}
 	}
 }

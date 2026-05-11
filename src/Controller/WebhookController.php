@@ -37,7 +37,7 @@ class WebhookController extends Controller {
 	 *
 	 * @todo Add a different route for test mode.... or maybe don't add them for test mode?
 	 */
-	public static function rest_api_init() {
+	public static function rest_api_init(): void {
 		$controller = new self(
 			logger: wc_get_logger(),
 		);
@@ -67,7 +67,7 @@ class WebhookController extends Controller {
 	 * Check the {@link https://docs.withflex.com/webhooks/verifying-webhooks webhook signature} to ensure that the
 	 * request originated from Flex.
 	 *
-	 * @param \WP_REST_Request $request The Request.
+	 * @param \WP_REST_Request $request   The Request.
 	 * @param bool             $test_mode Whether the request is a test mode request or not.
 	 */
 	public function permission_callback( \WP_REST_Request $request, bool $test_mode = false ): bool {
@@ -79,16 +79,17 @@ class WebhookController extends Controller {
 
 		$signature = '';
 		$versioned = $request->get_header( 'webhook-signature' ) ?? $request->get_header( 'svix-signature' );
-		if ( $versioned ) {
+		if ( null !== $versioned ) {
 			[$sig]         = explode( ' ', $versioned );
 			[, $signature] = explode( ',', $sig );
 		} else {
-			$signature = $request->get_header( 'flex-signature' );
+			$signature = $request->get_header( 'flex-signature' ) ?? '';
 		}
 
-		$result = hash_equals(
+		$decoded = base64_decode( $signature, true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode
+		$result  = false !== $decoded && hash_equals(
 			hash_hmac( 'sha256', $content, $webhook->secret(), true ),
-			base64_decode( $signature ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode
+			$decoded,
 		);
 
 		if ( false === $result ) {
@@ -121,7 +122,7 @@ class WebhookController extends Controller {
 	 *
 	 * @param \WP_REST_Request $request The Request.
 	 */
-	public function handle( \WP_REST_Request $request ) {
+	public function handle( \WP_REST_Request $request ): \WP_REST_Response {
 		$context = array(
 			'event_id'  => $request->get_header( 'flex-event-id' ),
 			'timestamp' => $request->get_header( 'flex-timestamp' ),
@@ -132,6 +133,11 @@ class WebhookController extends Controller {
 			$context,
 		);
 
+		/**
+		 * The webhook event payload.
+		 *
+		 * @var array<string, mixed> $data
+		 */
 		$data = $request->get_json_params();
 
 		sentry()->addBreadcrumb(
@@ -157,7 +163,8 @@ class WebhookController extends Controller {
 
 		$context['event_type'] = $data['event_type'];
 
-		$type = WebhookEvent::tryFrom( $data['event_type'] );
+		$event_type = is_string( $data['event_type'] ) ? $data['event_type'] : '';
+		$type       = WebhookEvent::tryFrom( $event_type );
 
 		if ( null === $type ) {
 			$error = new FlexException( 'Cannot handle event type' );
@@ -165,14 +172,14 @@ class WebhookController extends Controller {
 			sentry()->captureException( $error );
 			return new \WP_REST_Response(
 				data: array(
-					'error' => 'Cannot handle webhook of type ' . esc_html( $data['event_type'] ),
+					'error' => 'Cannot handle webhook of type ' . esc_html( $event_type ),
 				),
 				status: 422
 			);
 		}
 
 		if ( WebhookEvent::CHECKOUT_SESSION_COMPLETED === $type ) {
-			if ( ! isset( $data['object']['checkout_session'] ) || ! is_array( $data['object']['checkout_session'] ) ) {
+			if ( ! isset( $data['object']['checkout_session'] ) || ! is_array( $data['object']['checkout_session'] ) ) { // @phpstan-ignore offsetAccess.nonOffsetAccessible
 				$error = new FlexException( 'Event missing checkout session' );
 				$this->logger->error( $error->getMessage(), $context );
 				sentry()->captureException( $error );
@@ -184,7 +191,13 @@ class WebhookController extends Controller {
 				);
 			}
 
-			$received = CheckoutSession::from_flex( $data['object']['checkout_session'] );
+			/**
+			 * The checkout session data from the webhook payload.
+			 *
+			 * @var array<string, mixed> $checkout_session_data
+			 */
+			$checkout_session_data = $data['object']['checkout_session'];
+			$received              = CheckoutSession::from_flex( $checkout_session_data );
 
 			$context['checkout_session_id'] = $received->id();
 
@@ -206,13 +219,13 @@ class WebhookController extends Controller {
 
 			// If the order has not yet been marked as complete, do so.
 			if ( OrderStatus::PENDING === $order->get_status() ) {
-				$order->payment_complete( $received->id() );
+				$order->payment_complete( $received->id() ?? '' );
 			}
 
 			$received->apply_to( $order );
 			$order->save();
 		} elseif ( WebhookEvent::REFUND_UPDATED === $type ) {
-			if ( ! isset( $data['object']['refund'] ) || ! is_array( $data['object']['refund'] ) ) {
+			if ( ! isset( $data['object']['refund'] ) || ! is_array( $data['object']['refund'] ) ) { // @phpstan-ignore offsetAccess.nonOffsetAccessible
 				$error = new FlexException( 'Event missing refund' );
 				$this->logger->error( $error->getMessage(), $context );
 				sentry()->captureException( $error );
@@ -224,9 +237,15 @@ class WebhookController extends Controller {
 				);
 			}
 
-			$refund = Refund::from_flex( $data['object']['refund'] );
+			/**
+			 * The refund data from the webhook payload.
+			 *
+			 * @var array<string, mixed> $refund_data
+			 */
+			$refund_data = $data['object']['refund'];
+			$refund      = Refund::from_flex( $refund_data );
 
-			if ( $refund->status()?->failure() ) {
+			if ( true === $refund->status()?->failure() ) {
 				$wc_refund = $refund->wc();
 				if ( null === $wc_refund ) {
 					$error = new FlexException( 'WooCommerce refund does not exist for the given refund_id' );
@@ -242,7 +261,7 @@ class WebhookController extends Controller {
 
 				$order = wc_get_order( $wc_refund->get_parent_id() );
 
-				if ( false === $order ) {
+				if ( ! $order instanceof \WC_Order ) {
 					$message = 'WooCommerce order does not exist for the given refund_id';
 					$error   = new FlexException( $message );
 					$this->logger->error( $error->getMessage(), $context );

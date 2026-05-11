@@ -64,6 +64,8 @@ class Price extends Resource implements ResourceInterface {
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
+	 *
+	 * @return array{ active: bool, description: ?string, product: ?string, unit_amount: ?int }
 	 */
 	public function jsonSerialize(): array {
 		return array(
@@ -86,7 +88,7 @@ class Price extends Resource implements ResourceInterface {
 		$flex_product = null;
 		if ( ProductType::VARIATION === $product->get_type() ) {
 			$parent_product = wc_get_product( $product->get_parent_id() );
-			if ( $parent_product ) {
+			if ( $parent_product instanceof \WC_Product ) {
 				$flex_product = Product::from_wc( $parent_product );
 			}
 		} else {
@@ -99,18 +101,21 @@ class Price extends Resource implements ResourceInterface {
 		 * @see https://github.com/woocommerce/woocommerce/blob/9.3.3/plugins/woocommerce/includes/class-wc-structured-data.php#L203
 		 */
 		$short_description = $product->get_short_description();
-		$description       = trim( wp_strip_all_tags( do_shortcode( $short_description ? $short_description : $product->get_description() ) ) );
-		if ( ! $description && ProductType::VARIATION === $product->get_type() ) {
+		$description       = trim( wp_strip_all_tags( do_shortcode( '' !== $short_description ? $short_description : $product->get_description() ) ) );
+		if ( '' === $description && $product instanceof \WC_Product_Variation ) {
 			$description = wc_get_formatted_variation( $product, true );
 		}
 
+		$price_id_meta    = $product->get_meta( $meta_prefix . self::KEY_ID );
+		$eligibility_meta = $product->get_meta( $meta_prefix . self::KEY_HSA_FSA_ELIGIBILITY );
+
 		$price = new self(
-			id: $product->meta_exists( $meta_prefix . self::KEY_ID ) ? $product->get_meta( $meta_prefix . self::KEY_ID ) : null,
+			id: $product->meta_exists( $meta_prefix . self::KEY_ID ) && is_string( $price_id_meta ) ? $price_id_meta : null,
 			active: $product->get_status() !== ProductStatus::TRASH,
-			description: $description ? trim( $description ) : null,
-			product: $flex_product,
+			description: '' !== $description ? trim( $description ) : null,
+			product: $flex_product ?? new Product(),
 			unit_amount: self::currency_to_unit_amount( $product->get_regular_price() ),
-			hsa_fsa_eligibility: $product->meta_exists( $meta_prefix . self::KEY_HSA_FSA_ELIGIBILITY ) ? $product->get_meta( $meta_prefix . self::KEY_HSA_FSA_ELIGIBILITY ) : null,
+			hsa_fsa_eligibility: $product->meta_exists( $meta_prefix . self::KEY_HSA_FSA_ELIGIBILITY ) && is_string( $eligibility_meta ) ? $eligibility_meta : null,
 		);
 
 		$price->wc = $product;
@@ -129,7 +134,8 @@ class Price extends Resource implements ResourceInterface {
 	 * @param ?string                $id   Optional price ID from stored metadata.
 	 */
 	public static function from_wc_item( \WC_Order_Item_Product $item, ?string $id = null ): self {
-		$product  = $item->get_product();
+		$product = $item->get_product();
+		assert( $product instanceof \WC_Product );
 		$quantity = $item->get_quantity();
 
 		// Calculate expected vs actual totals.
@@ -155,7 +161,7 @@ class Price extends Resource implements ResourceInterface {
 	/**
 	 * Extract price data from an array of data returned by the Flex API.
 	 *
-	 * @param array|string $price The price object returned from the API.
+	 * @param array<string, mixed>|string $price The price object returned from the API.
 	 */
 	public static function from_flex( array|string $price ): self {
 		if ( is_string( $price ) ) {
@@ -171,17 +177,23 @@ class Price extends Resource implements ResourceInterface {
 	/**
 	 * Extract price data from an array of data returned by the Flex API.
 	 *
-	 * @param array $price The price object returned from the API.
+	 * @param array<string, mixed> $price The price object returned from the API.
 	 */
 	protected function extract( array $price ): void {
-		$this->id                  = $price['price_id'] ?? $this->id;
-		$this->active              = $price['active'] ?? $this->active;
-		$this->description         = $price['description'] ?? $this->description;
-		$this->unit_amount         = $price['unit_amount'] ?? $this->unit_amount;
-		$this->hsa_fsa_eligibility = $price['hsa_fsa_eligibility'] ?? $this->hsa_fsa_eligibility;
+		$this->id                  = isset( $price['price_id'] ) && is_string( $price['price_id'] ) ? $price['price_id'] : $this->id;
+		$this->active              = isset( $price['active'] ) && is_bool( $price['active'] ) ? $price['active'] : $this->active;
+		$this->description         = isset( $price['description'] ) && is_string( $price['description'] ) ? $price['description'] : $this->description;
+		$this->unit_amount         = isset( $price['unit_amount'] ) && is_int( $price['unit_amount'] ) ? $price['unit_amount'] : $this->unit_amount;
+		$this->hsa_fsa_eligibility = isset( $price['hsa_fsa_eligibility'] ) && is_string( $price['hsa_fsa_eligibility'] ) ? $price['hsa_fsa_eligibility'] : $this->hsa_fsa_eligibility;
 
 		if ( isset( $price['product'] ) ) {
-			$updated = Product::from_flex( $price['product'] );
+			/**
+			 * Product data from the price response.
+			 *
+			 * @var array<string, mixed>|string $product_data
+			 */
+			$product_data = $price['product'];
+			$updated      = Product::from_flex( $product_data );
 			if ( $this->product->id() !== $updated->id() ) {
 				$this->product = $updated;
 			}
@@ -260,7 +272,7 @@ class Price extends Resource implements ResourceInterface {
 		}
 
 		$amount = $this->wc->get_meta( $meta_prefix . self::KEY_AMOUNT );
-		if ( null === $amount || intval( $amount ) !== $this->unit_amount ) {
+		if ( null === $amount || ! is_scalar( $amount ) || intval( $amount ) !== $this->unit_amount ) {
 			return ResourceAction::CREATE;
 		}
 
@@ -291,6 +303,7 @@ class Price extends Resource implements ResourceInterface {
 	 *
 	 * @throws FlexException If the response is malformed.
 	 * @throws FlexResponseException Rethrows exception if it cannot be handled.
+	 * @throws \LogicException If an unhandled action is passed.
 	 */
 	public function exec( ResourceAction $action ): void {
 		if ( ! $this->can( $action ) ) {
@@ -342,6 +355,7 @@ class Price extends Resource implements ResourceInterface {
 				match ( $action ) {
 					ResourceAction::CREATE =>  '/v1/prices',
 					ResourceAction::UPDATE =>  '/v1/prices/' . $this->id,
+					default => throw new \LogicException( "Unhandled action: {$action->name}" ),
 				},
 				array(
 					'method' => 'POST',
@@ -349,11 +363,17 @@ class Price extends Resource implements ResourceInterface {
 				),
 			);
 
-			if ( ! isset( $data['price'] ) ) {
+			if ( ! isset( $data['price'] ) || ! is_array( $data['price'] ) ) {
 				throw new FlexException( 'Missing price in response.' );
 			}
 
-			$this->extract( $data['price'] );
+			/**
+			 * The price data from the API response.
+			 *
+			 * @var array<string, mixed> $price_data
+			 */
+			$price_data = $data['price'];
+			$this->extract( $price_data );
 		} catch ( FlexResponseException $e ) {
 			// Ensure the price exists before trying again.
 			if ( $e->code() === 422 ) {
@@ -381,11 +401,11 @@ class Price extends Resource implements ResourceInterface {
 
 		if ( null !== $this->wc ) {
 			$this->apply_to( $this->wc );
-			$this->wc->save();
+			$this->wc?->save();
 		}
 
 		// Deactivate the existing Product.
-		if ( $existing ) {
+		if ( null !== $existing ) {
 			$existing->exec( ResourceAction::UPDATE );
 		}
 	}

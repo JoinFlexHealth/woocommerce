@@ -34,19 +34,21 @@ class PriceTest extends \WP_UnitTestCase {
 		$product->save();
 
 		// Create an order with the product.
-		$order   = wc_create_order();
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
 		$item_id = $order->add_product( $product, 1 );
 		$order->save();
 
 		// Get the line item.
 		$item = $order->get_item( $item_id );
+		assert( $item instanceof \WC_Order_Item_Product );
 
 		// Create price from line item.
 		$price = Price::from_wc_item( $item );
 
 		// Verify the unit amount matches the catalog price (5000 cents = $50.00).
 		$json = $price->jsonSerialize();
-		$this->assertSame( 5000, $json['unit_amount'] );
+		self::assertSame( 5000, $json['unit_amount'] );
 	}
 
 	/**
@@ -64,12 +66,14 @@ class PriceTest extends \WP_UnitTestCase {
 		$product->save();
 
 		// Create an order with the product.
-		$order   = wc_create_order();
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
 		$item_id = $order->add_product( $product, 1 );
 		$order->save();
 
 		// Get the line item and modify subtotal to simulate an add-on ($52.95).
 		$item = $order->get_item( $item_id );
+		self::assertInstanceOf( \WC_Order_Item_Product::class, $item );
 		$item->set_subtotal( '52.95' );
 		$item->save();
 
@@ -78,10 +82,10 @@ class PriceTest extends \WP_UnitTestCase {
 
 		// Verify the unit amount uses the actual line item price (5295 cents = $52.95).
 		$json = $price->jsonSerialize();
-		$this->assertSame( 5295, $json['unit_amount'] );
+		self::assertSame( 5295, $json['unit_amount'] );
 
 		// Verify the description is set from the line item name.
-		$this->assertSame( 'Test Product', $json['description'] );
+		self::assertSame( 'Test Product', $json['description'] );
 	}
 
 	/**
@@ -98,13 +102,15 @@ class PriceTest extends \WP_UnitTestCase {
 		$product->save();
 
 		// Create an order with 2 units of the product.
-		$order   = wc_create_order();
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
 		$item_id = $order->add_product( $product, 2 );
 		$order->save();
 
 		// Get the line item and modify subtotal to simulate dynamic pricing.
 		// Expected: $25.00 * 2 = $50.00, but actual is $55.00 (e.g., volume pricing).
 		$item = $order->get_item( $item_id );
+		self::assertInstanceOf( \WC_Order_Item_Product::class, $item );
 		$item->set_subtotal( '55.00' );
 		$item->save();
 
@@ -113,7 +119,7 @@ class PriceTest extends \WP_UnitTestCase {
 
 		// Verify the unit amount is $55.00 / 2 = $27.50 per unit (2750 cents).
 		$json = $price->jsonSerialize();
-		$this->assertSame( 2750, $json['unit_amount'] );
+		self::assertSame( 2750, $json['unit_amount'] );
 	}
 
 	/**
@@ -130,19 +136,21 @@ class PriceTest extends \WP_UnitTestCase {
 		$product->save();
 
 		// Create an order with 3 units of the product.
-		$order   = wc_create_order();
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
 		$item_id = $order->add_product( $product, 3 );
 		$order->save();
 
 		// Get the line item (subtotal should be $75.00 = $25.00 * 3).
 		$item = $order->get_item( $item_id );
+		assert( $item instanceof \WC_Order_Item_Product );
 
 		// Create price from line item.
 		$price = Price::from_wc_item( $item );
 
 		// Verify the unit amount matches the catalog price (2500 cents = $25.00).
 		$json = $price->jsonSerialize();
-		$this->assertSame( 2500, $json['unit_amount'] );
+		self::assertSame( 2500, $json['unit_amount'] );
 	}
 
 	/**
@@ -161,11 +169,13 @@ class PriceTest extends \WP_UnitTestCase {
 		$product->save();
 
 		// Create order with dynamic pricing (add-on makes it $125).
-		$order   = wc_create_order();
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
 		$item_id = $order->add_product( $product, 1 );
 		$order->save();
 
 		$item = $order->get_item( $item_id );
+		self::assertInstanceOf( \WC_Order_Item_Product::class, $item );
 		$item->set_subtotal( '125.00' );
 		$item->save();
 
@@ -173,11 +183,11 @@ class PriceTest extends \WP_UnitTestCase {
 		$price = Price::from_wc_item( $item );
 
 		// The price should NOT have the product's stored ID.
-		$this->assertNull( $price->id(), 'Dynamic pricing should not inherit product price ID for new orders' );
+		self::assertNull( $price->id(), 'Dynamic pricing should not inherit product price ID for new orders' );
 
 		// But should have the correct amount.
 		$json = $price->jsonSerialize();
-		$this->assertSame( 12500, $json['unit_amount'] );
+		self::assertSame( 12500, $json['unit_amount'] );
 	}
 
 	/**
@@ -195,11 +205,13 @@ class PriceTest extends \WP_UnitTestCase {
 		$product->save();
 
 		// Create order with dynamic pricing.
-		$order   = wc_create_order();
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
 		$item_id = $order->add_product( $product, 1 );
 		$order->save();
 
 		$item = $order->get_item( $item_id );
+		self::assertInstanceOf( \WC_Order_Item_Product::class, $item );
 		$item->set_subtotal( '125.00' );
 		$item->save();
 
@@ -208,11 +220,11 @@ class PriceTest extends \WP_UnitTestCase {
 		$price     = Price::from_wc_item( $item, $stored_id );
 
 		// The price should have the stored ID (not product's ID).
-		$this->assertSame( $stored_id, $price->id(), 'Dynamic pricing should preserve stored ID for refunds' );
+		self::assertSame( $stored_id, $price->id(), 'Dynamic pricing should preserve stored ID for refunds' );
 
 		// And the correct amount.
 		$json = $price->jsonSerialize();
-		$this->assertSame( 12500, $json['unit_amount'] );
+		self::assertSame( 12500, $json['unit_amount'] );
 	}
 
 	/**
@@ -232,11 +244,13 @@ class PriceTest extends \WP_UnitTestCase {
 		$product->save();
 
 		// Create order with matching price (no add-ons).
-		$order   = wc_create_order();
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
 		$item_id = $order->add_product( $product, 1 );
 		$order->save();
 
 		$item = $order->get_item( $item_id );
+		assert( $item instanceof \WC_Order_Item_Product );
 
 		// Create price WITH a stored ID from the original checkout.
 		// This simulates a refund where the product's price ID has changed since purchase.
@@ -244,10 +258,10 @@ class PriceTest extends \WP_UnitTestCase {
 		$price     = Price::from_wc_item( $item, $stored_id );
 
 		// The price should use the stored ID, NOT the product's current ID.
-		$this->assertSame( $stored_id, $price->id(), 'Matching price refunds must use stored ID, not product ID' );
+		self::assertSame( $stored_id, $price->id(), 'Matching price refunds must use stored ID, not product ID' );
 
 		// Amount should still be correct.
 		$json = $price->jsonSerialize();
-		$this->assertSame( 10000, $json['unit_amount'] );
+		self::assertSame( 10000, $json['unit_amount'] );
 	}
 }

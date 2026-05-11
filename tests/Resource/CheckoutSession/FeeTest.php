@@ -32,6 +32,7 @@ class FeeTest extends \WP_UnitTestCase {
 
 		// Create an order with the product.
 		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
 		$order->add_product( $product, 1 );
 
 		// Add multiple fees to the order.
@@ -51,11 +52,11 @@ class FeeTest extends \WP_UnitTestCase {
 
 		// Verify that WooCommerce returns fees with non-sequential keys.
 		$wc_fees = $order->get_fees();
-		$this->assertCount( 2, $wc_fees, 'Order should have 2 fees' );
+		self::assertCount( 2, $wc_fees, 'Order should have 2 fees' );
 
 		// The keys are item IDs, which are not sequential (e.g., [42, 57]).
 		$wc_fee_keys = array_keys( $wc_fees );
-		$this->assertNotSame( array( 0, 1 ), $wc_fee_keys, 'WooCommerce fees should have non-sequential item ID keys' );
+		self::assertNotSame( array( 0, 1 ), $wc_fee_keys, 'WooCommerce fees should have non-sequential item ID keys' );
 
 		// Create CheckoutSession from the order.
 		$checkout_session = CheckoutSession::from_wc( $order );
@@ -64,14 +65,19 @@ class FeeTest extends \WP_UnitTestCase {
 		$json = $checkout_session->jsonSerialize();
 
 		// The fees array must have sequential integer keys.
-		$this->assertArrayHasKey( 'fees', $json, 'JSON should contain fees' );
-		$this->assertCount( 2, $json['fees'], 'JSON should have 2 fees' );
-		$this->assertSame( array( 0, 1 ), array_keys( $json['fees'] ), 'Fees must have sequential integer keys' );
+		if ( ! isset( $json['fees'] ) ) {
+			self::fail( 'Expected fees key to be present' );
+		}
+		$fees = $json['fees'];
+		self::assertCount( 2, $fees, 'JSON should have 2 fees' );
+		self::assertSame( array( 0, 1 ), array_keys( $fees ), 'Fees must have sequential integer keys' );
 
 		// Verify fee data is correctly extracted.
-		$this->assertSame( 500, $json['fees'][0]->jsonSerialize()['amount'], 'First fee should have correct amount' );
-		$this->assertSame( 'Recycling Fee', $json['fees'][0]->jsonSerialize()['name'], 'First fee should have correct name' );
-		$this->assertSame( 250, $json['fees'][1]->jsonSerialize()['amount'], 'Second fee should have correct amount' );
-		$this->assertSame( 'Processing Fee', $json['fees'][1]->jsonSerialize()['name'], 'Second fee should have correct name' );
+		self::assertInstanceOf( \Flex\Resource\CheckoutSession\Fee::class, $fees[0] );
+		self::assertInstanceOf( \Flex\Resource\CheckoutSession\Fee::class, $fees[1] );
+		self::assertSame( 500, $fees[0]->jsonSerialize()['amount'], 'First fee should have correct amount' );
+		self::assertSame( 'Recycling Fee', $fees[0]->jsonSerialize()['name'], 'First fee should have correct name' );
+		self::assertSame( 250, $fees[1]->jsonSerialize()['amount'], 'Second fee should have correct amount' );
+		self::assertSame( 'Processing Fee', $fees[1]->jsonSerialize()['name'], 'Second fee should have correct name' );
 	}
 }

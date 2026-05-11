@@ -20,13 +20,6 @@ use Flex\Resource\ResourceAction;
 class Refund extends Resource {
 
 	/**
-	 * Line Items
-	 *
-	 * @var LineItem[]
-	 */
-	protected array $line_items;
-
-	/**
 	 * WooCommerce Order Refund
 	 *
 	 * @var ?\WC_Order_Refund
@@ -39,17 +32,12 @@ class Refund extends Resource {
 	 * @param string                $id The checkout session id.
 	 * @param LineItem[]            $line_items The line items for the checkout session.
 	 * @param ?array<string,string> $refund_metadata Metadata to attach to the refund.
-	 * @throws \LogicException If the line items contain something other than a LineItem.
 	 */
 	public function __construct(
 		protected string $id,
-		array $line_items,
+		protected array $line_items,
 		protected ?array $refund_metadata = null,
 	) {
-		if ( ! array_all( $line_items, fn ( $item ) => $item instanceof LineItem ) ) {
-			throw new \LogicException( 'Refund::$line_items may only contain instances of LineItem' );
-		}
-		$this->line_items = $line_items;
 	}
 
 	/**
@@ -63,6 +51,8 @@ class Refund extends Resource {
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
+	 *
+	 * @return array{ line_items: LineItem[], refund_metadata?: array<string, string> }
 	 */
 	public function jsonSerialize(): array {
 		$data = array(
@@ -85,20 +75,23 @@ class Refund extends Resource {
 	public static function from_wc( \WC_Order_Refund $refund ): self {
 		$refund_amount = self::currency_to_unit_amount( $refund->get_total() );
 		$order         = wc_get_order( $refund->get_parent_id() );
+		assert( $order instanceof \WC_Order );
 
-		$cs_refund = new self(
+		$refund_product_items = array_filter( $refund->get_items(), static fn( $item ) => $item instanceof \WC_Order_Item_Product );
+		$cs_refund            = new self(
 			id: $order->get_transaction_id(),
-			line_items: array_map( fn( $item ) => LineItem::from_wc( $item ), array_values( $refund->get_items() ) ),
+			line_items: array_map( fn( \WC_Order_Item_Product $item ) => LineItem::from_wc( $item ), array_values( $refund_product_items ) ),
 			refund_metadata: array( 'refund_id' => (string) $refund->get_id() ),
 		);
 
 		$cs_refund->wc = $refund;
 
-		if ( empty( $cs_refund->line_items ) ) {
+		if ( array() === $cs_refund->line_items ) {
 			// If the line items are empty, then the user only specified an amount, not a line item amount,
 			// therefore, we will spread the amount proportionally against all of the items.
 			$order_total = self::currency_to_unit_amount( $order->get_total() );
 
+			$order_product_items   = array_filter( $order->get_items(), static fn( $item ) => $item instanceof \WC_Order_Item_Product );
 			$cs_refund->line_items = array_map(
 				function ( \WC_Order_Item_Product $item ) use ( $refund_amount, $order_total ) {
 					$ratio        = self::currency_to_unit_amount( $item->get_total() ) / $order_total;
@@ -108,7 +101,7 @@ class Refund extends Resource {
 						amount_to_refund: intval( ceil( $ratio * $refund_amount ) ),
 					);
 				},
-				array_values( $order->get_items() )
+				array_values( $order_product_items )
 			);
 		} else {
 			// Determine if the line item total, specified by the user, adds up. If there is some left, spread it proportionally
@@ -130,7 +123,7 @@ class Refund extends Resource {
 			}
 		}
 
-		if ( empty( $cs_refund->line_items ) ) {
+		if ( array() === $cs_refund->line_items ) {
 			throw new FlexException( 'Refunds can only be made against line items' );
 		}
 
@@ -174,12 +167,12 @@ class Refund extends Resource {
 	/**
 	 * Extract the values from a checkout session API response.
 	 *
-	 * @param array $checkout_session The checkout session object returned from the API.
+	 * @param array<string, mixed> $checkout_session The checkout session object returned from the API.
 	 *
 	 * @throws \Exception If data is missing.
 	 */
 	protected function extract( array $checkout_session ): void {
-		$this->id = $checkout_session['checkout_session_id'] ?? $this->id;
+		$this->id = isset( $checkout_session['checkout_session_id'] ) && is_string( $checkout_session['checkout_session_id'] ) ? $checkout_session['checkout_session_id'] : $this->id;
 	}
 
 	/**
@@ -189,7 +182,7 @@ class Refund extends Resource {
 	 */
 	public function can( ResourceAction $action ): bool {
 		return match ( $action ) {
-			ResourceAction::CREATE => ! empty( $this->line_items ),
+			ResourceAction::CREATE => array() !== $this->line_items,
 			default => false,
 		};
 	}

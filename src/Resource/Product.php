@@ -65,6 +65,8 @@ class Product extends Resource implements ResourceInterface {
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
+	 *
+	 * @return array{ name: string, active: bool, description: ?string, url: ?string, gtin?: ?string }
 	 */
 	public function jsonSerialize(): array {
 		$data = array(
@@ -85,7 +87,7 @@ class Product extends Resource implements ResourceInterface {
 	/**
 	 * Extract product data from an array of data returned by the Flex API.
 	 *
-	 * @param array|string $product The product object returned from the API.
+	 * @param array<string, mixed>|string $product The product object returned from the API.
 	 */
 	public static function from_flex( array|string $product ): self {
 		if ( is_string( $product ) ) {
@@ -100,16 +102,16 @@ class Product extends Resource implements ResourceInterface {
 	/**
 	 * Extract product data from an array of data returned by the Flex API.
 	 *
-	 * @param array $product The product object returned from the API.
+	 * @param array<string, mixed> $product The product object returned from the API.
 	 */
 	protected function extract( array $product ): void {
-		$this->name                = $product['name'] ?? $this->name;
-		$this->id                  = $product['product_id'] ?? $this->id;
-		$this->active              = $product['active'] ?? $this->active;
-		$this->description         = $product['description'] ?? $this->description;
-		$this->gtin                = $product['gtin'] ?? $this->gtin;
-		$this->url                 = $product['url'] ?? $this->url;
-		$this->hsa_fsa_eligibility = $product['hsa_fsa_eligibility'] ?? $this->hsa_fsa_eligibility;
+		$this->name                = isset( $product['name'] ) && is_string( $product['name'] ) ? $product['name'] : $this->name;
+		$this->id                  = isset( $product['product_id'] ) && is_string( $product['product_id'] ) ? $product['product_id'] : $this->id;
+		$this->active              = isset( $product['active'] ) && is_bool( $product['active'] ) ? $product['active'] : $this->active;
+		$this->description         = isset( $product['description'] ) && is_string( $product['description'] ) ? $product['description'] : $this->description;
+		$this->gtin                = isset( $product['gtin'] ) && is_string( $product['gtin'] ) ? $product['gtin'] : $this->gtin;
+		$this->url                 = isset( $product['url'] ) && is_string( $product['url'] ) ? $product['url'] : $this->url;
+		$this->hsa_fsa_eligibility = isset( $product['hsa_fsa_eligibility'] ) && is_string( $product['hsa_fsa_eligibility'] ) ? $product['hsa_fsa_eligibility'] : $this->hsa_fsa_eligibility;
 	}
 
 	/**
@@ -119,7 +121,7 @@ class Product extends Resource implements ResourceInterface {
 	 */
 	protected static function wc_gtin( \WC_Product $product ): ?string {
 		$global_unique_id = $product->get_global_unique_id();
-		if ( ! empty( $global_unique_id ) ) {
+		if ( '' !== $global_unique_id ) {
 			$structured_data  = WC()->structured_data;
 			$global_unique_id = $structured_data->prepare_gtin( $global_unique_id );
 			if ( $structured_data->is_valid_gtin( $global_unique_id ) ) {
@@ -144,19 +146,22 @@ class Product extends Resource implements ResourceInterface {
 		 * @see https://github.com/woocommerce/woocommerce/blob/9.3.3/plugins/woocommerce/includes/class-wc-structured-data.php#L203
 		 */
 		$short_description = $product->get_short_description();
-		$description       = trim( wp_strip_all_tags( do_shortcode( $short_description ? $short_description : $product->get_description() ) ) );
+		$description       = trim( wp_strip_all_tags( do_shortcode( '' !== $short_description ? $short_description : $product->get_description() ) ) );
 		$url               = get_permalink( $product->get_id() );
 
 		$gtin = self::wc_gtin( $product );
 
+		$product_id_meta  = $product->get_meta( $meta_prefix . self::KEY_ID );
+		$eligibility_meta = $product->get_meta( $meta_prefix . self::KEY_HSA_FSA_ELIGIBILITY );
+
 		$p = new self(
 			name: $product->get_name(),
-			id: $product->meta_exists( $meta_prefix . self::KEY_ID ) ? $product->get_meta( $meta_prefix . self::KEY_ID ) : null,
+			id: $product->meta_exists( $meta_prefix . self::KEY_ID ) && is_string( $product_id_meta ) ? $product_id_meta : null,
 			active: $product->get_status() !== ProductStatus::TRASH,
-			description: $description ? $description : null,
+			description: '' !== $description ? $description : null,
 			gtin: $gtin,
-			url: $url ? $url : null,
-			hsa_fsa_eligibility: $product->meta_exists( $meta_prefix . self::KEY_HSA_FSA_ELIGIBILITY ) ? $product->get_meta( $meta_prefix . self::KEY_HSA_FSA_ELIGIBILITY ) : null,
+			url: false !== $url && '' !== $url ? $url : null,
+			hsa_fsa_eligibility: $product->meta_exists( $meta_prefix . self::KEY_HSA_FSA_ELIGIBILITY ) && is_string( $eligibility_meta ) ? $eligibility_meta : null,
 		);
 
 		$p->wc = $product;
@@ -219,8 +224,8 @@ class Product extends Resource implements ResourceInterface {
 		}
 
 		// Only override the existing GTIN if it's managed by WooCommerce or is empty.
-		if ( null !== self::wc_gtin( $product ) || empty( $product->get_global_unique_id() ) ) {
-			$product->set_global_unique_id( $this->gtin );
+		if ( null !== self::wc_gtin( $product ) || '' === $product->get_global_unique_id() ) {
+			$product->set_global_unique_id( $this->gtin ?? '' );
 		}
 	}
 
@@ -244,6 +249,7 @@ class Product extends Resource implements ResourceInterface {
 	 *
 	 * @throws FlexException If the response is malformed.
 	 * @throws FlexResponseException Rethrows exception if it cannot be handled.
+	 * @throws \LogicException If unsupported actions is passed in.
 	 */
 	public function exec( ResourceAction $action ): void {
 		if ( ! $this->can( $action ) ) {
@@ -286,6 +292,7 @@ class Product extends Resource implements ResourceInterface {
 				match ( $action ) {
 					ResourceAction::CREATE =>  '/v1/products',
 					ResourceAction::UPDATE, ResourceAction::REFRESH =>  '/v1/products/' . $this->id,
+					default => throw new \LogicException( "Unhandled action: {$action->name}" ),
 				},
 				array(
 					'method' => match ( $action ) {
@@ -300,11 +307,17 @@ class Product extends Resource implements ResourceInterface {
 				),
 			);
 
-			if ( ! isset( $data['product'] ) ) {
+			if ( ! isset( $data['product'] ) || ! is_array( $data['product'] ) ) {
 				throw new FlexException( 'Missing product in response.' );
 			}
 
-			$this->extract( $data['product'] );
+			/**
+			 * The product data from the API response.
+			 *
+			 * @var array<string, mixed> $product_data
+			 */
+			$product_data = $data['product'];
+			$this->extract( $product_data );
 		} catch ( FlexResponseException $e ) {
 			if ( ResourceAction::CREATE === $action ) {
 				throw $e;
@@ -321,11 +334,11 @@ class Product extends Resource implements ResourceInterface {
 
 		if ( null !== $this->wc ) {
 			$this->apply_to( $this->wc );
-			$this->wc->save();
+			$this->wc?->save();
 		}
 
 		// Deactivate the existing Product.
-		if ( $existing ) {
+		if ( null !== $existing ) {
 			$existing->exec( ResourceAction::UPDATE );
 		}
 	}

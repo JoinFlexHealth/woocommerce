@@ -18,7 +18,7 @@ namespace Flex;
  * If WooCommerce has initialized the payment gateways, return that instance, if not, return a new instance.
  */
 function payment_gateway(): PaymentGateway {
-	if ( did_action( 'wc_payment_gateways_initialized' ) ) {
+	if ( did_action( 'wc_payment_gateways_initialized' ) > 0 ) {
 		$gateways = WC()->payment_gateways()->payment_gateways();
 		if ( isset( $gateways['flex'] ) && $gateways['flex'] instanceof PaymentGateway ) {
 			return $gateways['flex'];

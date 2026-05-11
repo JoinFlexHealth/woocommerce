@@ -54,7 +54,8 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 		}
 
 		// Split the string based on the decimal separator.
-		$parts = explode( wc_get_price_decimal_separator(), (string) $value );
+		$separator = wc_get_price_decimal_separator();
+		$parts     = explode( '' !== $separator ? $separator : '.', (string) $value );
 
 		// Get the dollar amount (remove thousand separators).
 		$dollars = str_replace( wc_get_price_thousand_separator(), '', $parts[0] );
@@ -79,8 +80,10 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 	/**
 	 * Request to the Flex API.
 	 *
-	 * @param string $path The path, starting with a forward slash, to the resource.
-	 * @param array  $args The arguments to pass to {@link wp_remote_request}.
+	 * @param string               $path The path, starting with a forward slash, to the resource.
+	 * @param array<string, mixed> $args The arguments to pass to {@link wp_remote_request}.
+	 *
+	 * @return array<string, mixed>
 	 *
 	 * @throws FlexException When things don't go well.
 	 * @throws FlexResponseException When Flex responds with something other than OK.
@@ -88,7 +91,7 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 	 */
 	protected function remote_request( string $path, array $args = array() ): array {
 		$api_key = self::payment_gateway()->api_key();
-		if ( empty( $api_key ) ) {
+		if ( null === $api_key || '' === $api_key ) {
 			throw new FlexException( 'API Key is not set' );
 		}
 
@@ -108,7 +111,9 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 			$headers['sentry-trace'] = $span->toTraceparent();
 		}
 
-		$method = $args['method'] ?? 'GET';
+		$method        = isset( $args['method'] ) && is_string( $args['method'] ) ? $args['method'] : 'GET';
+		$flex          = isset( $args['flex'] ) && is_array( $args['flex'] ) ? $args['flex'] : array();
+		$extra_headers = isset( $args['headers'] ) && is_array( $args['headers'] ) ? $args['headers'] : array();
 
 		// Add idempotency key for mutating requests.
 		if ( 'GET' !== $method ) {
@@ -124,24 +129,26 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 			'url'    => $base . $path,
 		);
 
-		if ( isset( $args['flex']['data'] ) ) {
-			$meta['request'] = $args['flex']['data'];
+		if ( isset( $flex['data'] ) ) {
+			$meta['request'] = $flex['data'];
 		}
 
-		$response = wp_remote_request(
-			$base . $path,
-			array_merge(
-				array(
-					'timeout' => 10,
-					'headers' => array_merge(
-						$headers,
-						$args['headers'] ?? array(),
-					),
-					'body'    => $args['body'] ?? isset( $args['flex']['data'] ) ? wp_json_encode( $args['flex']['data'] ) : null,
-				),
-				$args,
+		$body = isset( $args['body'] ) && is_string( $args['body'] ) ? $args['body'] : ( isset( $flex['data'] ) ? wp_json_encode( $flex['data'] ) : null );
+
+		$request_args = array(
+			'method'  => $method,
+			'timeout' => 10,
+			'headers' => array_merge(
+				$headers,
+				$extra_headers,
 			),
 		);
+
+		if ( is_string( $body ) ) {
+			$request_args['body'] = $body;
+		}
+
+		$response = wp_remote_request( $base . $path, $request_args );
 
 		if ( is_wp_error( $response ) ) {
 			sentry()->addBreadcrumb(
@@ -162,7 +169,7 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 
 		$body = wp_remote_retrieve_body( $response );
 
-		if ( ! $body ) {
+		if ( '' === $body ) {
 			sentry()->addBreadcrumb(
 				new Breadcrumb(
 					category: 'request',
@@ -172,7 +179,7 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 				),
 			);
 			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
-			throw new FlexResponseException( $response, "Missing Response Body $method $path $code" );
+			throw new FlexResponseException( $response, "Missing Response Body {$method} {$path} {$code}" );
 		}
 
 		if ( $code < 200 || $code >= 300 ) {
@@ -185,10 +192,15 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 				)
 			);
 			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
-			throw new FlexResponseException( $response, "Response Failed $method $path $code $body" );
+			throw new FlexResponseException( $response, "Response Failed {$method} {$path} {$code} {$body}" );
 		}
 
 		try {
+			/**
+			 * The decoded API response.
+			 *
+			 * @var array<string, mixed> $data
+			 */
 			$data = json_decode(
 				json: $body,
 				associative: true,

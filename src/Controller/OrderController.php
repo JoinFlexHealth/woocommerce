@@ -22,7 +22,7 @@ class OrderController extends Controller {
 	/**
 	 * Rest API Init.
 	 */
-	public static function rest_api_init() {
+	public static function rest_api_init(): void {
 		$controller = new self();
 
 		register_rest_route(
@@ -47,17 +47,17 @@ class OrderController extends Controller {
 	 */
 	public function permission_callback( \WP_REST_Request $request ): bool {
 		$id = $request->get_param( 'id' );
-		if ( empty( $id ) ) {
+		if ( null === $id ) {
 			return false;
 		}
 
 		$key = $request->get_param( 'key' );
-		if ( empty( $key ) ) {
+		if ( ! is_string( $key ) || '' === $key ) {
 			return false;
 		}
 
 		$order = wc_get_order( $id );
-		if ( false === $order ) {
+		if ( ! $order instanceof \WC_Order ) {
 			return false;
 		}
 
@@ -70,12 +70,12 @@ class OrderController extends Controller {
 	 *
 	 * @param \WP_REST_Request $request The Request.
 	 */
-	public function complete( \WP_REST_Request $request ) {
+	public function complete( \WP_REST_Request $request ): \WP_REST_Response {
 		$id    = $request->get_param( 'id' );
 		$order = wc_get_order( $id );
 
 		// If an order isn't returned, then redirect to the homepage since there is nothing we can really do.
-		if ( false === $order ) {
+		if ( ! $order instanceof \WC_Order ) {
 			return new \WP_REST_Response(
 				status: 307,
 				headers: array(
@@ -94,7 +94,7 @@ class OrderController extends Controller {
 				// and it hasn't already been updated by the webhooks.
 				$order = wc_get_order( $id );
 
-				if ( false === $order ) {
+				if ( ! $order instanceof \WC_Order ) {
 					return new \WP_REST_Response(
 						status: 307,
 						headers: array(
@@ -104,7 +104,7 @@ class OrderController extends Controller {
 				}
 
 				if ( OrderStatus::PENDING === $order->get_status() ) {
-					$order->payment_complete( $checkout_session->id() );
+					$order->payment_complete( $checkout_session->id() ?? '' );
 				}
 			}
 		}

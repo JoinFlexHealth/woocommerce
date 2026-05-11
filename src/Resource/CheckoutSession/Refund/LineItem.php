@@ -53,6 +53,8 @@ class LineItem implements \JsonSerializable {
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
+	 *
+	 * @return array{ price: ?string, amount_to_refund: int }
 	 */
 	public function jsonSerialize(): array {
 		return array(
@@ -67,8 +69,13 @@ class LineItem implements \JsonSerializable {
 	 * @param \WC_Order_Item_Product $item The WooCommerce Order Item.
 	 */
 	public static function from_wc( \WC_Order_Item_Product $item ): self {
-		$order        = wc_get_order( $item->get_order()->get_parent_id() );
-		$cs_line_item = CheckoutSessionLineItem::from_wc( $order->get_item( $item->get_meta( '_refunded_item_id' ) ) );
+		$order = wc_get_order( $item->get_order()->get_parent_id() );
+		assert( $order instanceof \WC_Order );
+		$refunded_item_id = $item->get_meta( '_refunded_item_id' );
+		assert( is_numeric( $refunded_item_id ) );
+		$original_item = $order->get_item( (int) $refunded_item_id );
+		assert( $original_item instanceof \WC_Order_Item_Product );
+		$cs_line_item = CheckoutSessionLineItem::from_wc( $original_item );
 
 		$line_item = new self(
 			price: $cs_line_item->price(),

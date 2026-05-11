@@ -57,6 +57,7 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 
 = 3.3.3 =
 * Added Sentry alert when async actions exhaust max retries for better production debugging.
+* Added static analysis at PHPStan max level with strict rules.
 
 = 3.3.2 =
 * Fixed a fatal error caused by [PHP Scoper](https://github.com/humbug/php-scoper) being run in PHP 8.5 which it [does not yet support](https://github.com/humbug/php-scoper/issues/1139) and [silently fails](https://github.com/humbug/php-scoper/issues/1138).

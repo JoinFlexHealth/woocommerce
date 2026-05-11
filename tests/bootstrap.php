@@ -15,11 +15,11 @@ $_tests_dir = dirname( __DIR__ ) . '/vendor/wp-phpunit/wp-phpunit';
 // Default paths are relative to woocommerce project structure for local development.
 $_plugin_dir  = dirname( __DIR__ );
 $_woo_root    = dirname( $_plugin_dir, 2 );
-$_wp_core_dir = getenv( 'WP_CORE_DIR' ) ? getenv( 'WP_CORE_DIR' ) : $_woo_root . '/web/wp';
-$_db_name     = getenv( 'DB_NAME' ) ? getenv( 'DB_NAME' ) : 'wordpress_test';
-$_db_user     = getenv( 'DB_USER' ) ? getenv( 'DB_USER' ) : 'root';
-$_db_pass     = getenv( 'DB_PASS' ) ? getenv( 'DB_PASS' ) : '';
-$_db_host     = getenv( 'DB_HOST' ) ? getenv( 'DB_HOST' ) : 'localhost';
+$_wp_core_dir = false !== getenv( 'WP_CORE_DIR' ) ? getenv( 'WP_CORE_DIR' ) : $_woo_root . '/web/wp';
+$_db_name     = false !== getenv( 'DB_NAME' ) ? getenv( 'DB_NAME' ) : 'wordpress_test';
+$_db_user     = false !== getenv( 'DB_USER' ) ? getenv( 'DB_USER' ) : 'root';
+$_db_pass     = false !== getenv( 'DB_PASS' ) ? getenv( 'DB_PASS' ) : '';
+$_db_host     = false !== getenv( 'DB_HOST' ) ? getenv( 'DB_HOST' ) : 'localhost';
 
 // Create tmp directory in plugin root (git-ignored).
 // This is required because wp-phpunit runs install.php as a separate process
@@ -70,10 +70,10 @@ require_once "{$_tests_dir}/includes/functions.php";
 /**
  * Manually load the plugin being tested.
  */
-function _manually_load_plugin() {
+function _manually_load_plugin(): void {
 	// Load WooCommerce first (required for wc_* functions).
 	$wc_dir = getenv( 'WC_DIR' );
-	if ( ! $wc_dir ) {
+	if ( false === $wc_dir ) {
 		// Default path relative to woocommerce project structure.
 		$wc_dir = dirname( __DIR__, 3 ) . '/web/wp-content/plugins/woocommerce';
 	}

@@ -27,33 +27,19 @@ class Coupon extends Resource {
 	protected ?\WC_Product $wc = null;
 
 	/**
-	 * The prices that the coupon applies to.
-	 *
-	 * @var Price[]
-	 */
-	protected $applies_to;
-
-	/**
 	 * Creates a coupon
 	 *
-	 * @param string   $name The name of the coupon.
-	 * @param ?string  $id The id of the coupon.
-	 * @param ?int     $amount_off The amount to take off in cents.
-	 * @param ?Price[] $applies_to $the prices that the coupon applies to.
-	 *
-	 * @throws \LogicException If $applies_to contains anything other than instances of Price.
+	 * @param string  $name The name of the coupon.
+	 * @param ?string $id The id of the coupon.
+	 * @param ?int    $amount_off The amount to take off in cents.
+	 * @param Price[] $applies_to The prices that the coupon applies to.
 	 */
 	public function __construct(
 		protected string $name = '',
 		protected ?string $id = null,
 		protected ?int $amount_off = null,
-		?array $applies_to = null,
+		protected array $applies_to = array(),
 	) {
-		if ( ! empty( $applies_to ) && ! array_all( $applies_to, fn ( $item ) => $item instanceof Price ) ) {
-			throw new \LogicException( 'Coupon::$applies_to may only contain instances of Price' );
-		}
-
-		$this->applies_to = $applies_to ?? array();
 	}
 
 	/**
@@ -74,6 +60,8 @@ class Coupon extends Resource {
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
+	 *
+	 * @return array{ name: string, amount_off: ?int, applies_to?: array{ prices: (?string)[] } }
 	 */
 	public function jsonSerialize(): array {
 		$data = array(
@@ -81,8 +69,10 @@ class Coupon extends Resource {
 			'amount_off' => $this->amount_off,
 		);
 
-		if ( ! empty( $this->applies_to ) ) {
-			$data['applies_to']['prices'] = array_map( fn ( $price ) => $price->id(), $this->applies_to );
+		if ( array() !== $this->applies_to ) {
+			$data['applies_to'] = array(
+				'prices' => array_map( fn ( $price ) => $price->id(), $this->applies_to ),
+			);
 		}
 
 		return $data;
@@ -91,22 +81,29 @@ class Coupon extends Resource {
 	/**
 	 * Extract coupon data from an array of data returned by the Flex API.
 	 *
-	 * @param array $coupon The coupon object returned from the API.
+	 * @param array<string, mixed> $coupon The coupon object returned from the API.
 	 */
 	protected function extract( array $coupon ): void {
-		$this->id         = $coupon['coupon_id'] ?? $this->id;
-		$this->name       = $coupon['name'] ?? $this->name;
-		$this->amount_off = $coupon['amount_off'] ?? $this->amount_off;
+		$this->id         = isset( $coupon['coupon_id'] ) && is_string( $coupon['coupon_id'] ) ? $coupon['coupon_id'] : $this->id;
+		$this->name       = isset( $coupon['name'] ) && is_string( $coupon['name'] ) ? $coupon['name'] : $this->name;
+		$this->amount_off = isset( $coupon['amount_off'] ) && is_int( $coupon['amount_off'] ) ? $coupon['amount_off'] : $this->amount_off;
 
-		if ( ! empty( $coupon['applies_to']['prices'] ) && is_array( $coupon['applies_to']['prices'] ) ) {
-			$this->applies_to = array_map( static fn ( $price ) => Price::from_flex( $price ), $coupon['applies_to']['prices'] );
+		$applies_to = isset( $coupon['applies_to'] ) && is_array( $coupon['applies_to'] ) ? $coupon['applies_to'] : array();
+		if ( isset( $applies_to['prices'] ) && is_array( $applies_to['prices'] ) && array() !== $applies_to['prices'] ) {
+			/**
+			 * Price data for coupon applicability.
+			 *
+			 * @var list<array<string, mixed> |string> $prices
+			 */
+			$prices           = $applies_to['prices'];
+			$this->applies_to = array_map( static fn ( array|string $price ) => Price::from_flex( $price ), $prices );
 		}
 	}
 
 	/**
 	 * Extract coupon data from an array of data returned by the Flex API.
 	 *
-	 * @param array|string $coupon The coupon object returned from the API.
+	 * @param array<string, mixed>|string $coupon The coupon object returned from the API.
 	 */
 	public static function from_flex( array|string $coupon ): self {
 		if ( is_string( $coupon ) ) {
@@ -134,8 +131,9 @@ class Coupon extends Resource {
 			}
 		}
 
-		$coupon = new self(
-			id: $product->meta_exists( $meta_prefix . self::KEY_ID ) ? $product->get_meta( $meta_prefix . self::KEY_ID ) : null,
+		$coupon_id_meta = $product->get_meta( $meta_prefix . self::KEY_ID );
+		$coupon         = new self(
+			id: $product->meta_exists( $meta_prefix . self::KEY_ID ) && is_string( $coupon_id_meta ) ? $coupon_id_meta : null,
 			name: __( 'Sale', 'pay-with-flex' ),
 			applies_to: array(
 				Price::from_wc( $product ),
@@ -176,7 +174,7 @@ class Coupon extends Resource {
 		}
 
 		// If there is no amount off, there is nothing to be done.
-		if ( empty( $this->amount_off ) ) {
+		if ( null === $this->amount_off || 0 === $this->amount_off ) {
 			return ResourceAction::NONE;
 		}
 
@@ -240,15 +238,21 @@ class Coupon extends Resource {
 			),
 		);
 
-		if ( ! isset( $data['coupon'] ) ) {
+		if ( ! isset( $data['coupon'] ) || ! is_array( $data['coupon'] ) ) {
 			throw new FlexException( 'Missing coupon in response.' );
 		}
 
-		$this->extract( $data['coupon'] );
+		/**
+		 * The coupon data from the API response.
+		 *
+		 * @var array<string, mixed> $coupon_data
+		 */
+		$coupon_data = $data['coupon'];
+		$this->extract( $coupon_data );
 
 		if ( null !== $this->wc ) {
 			$this->apply_to( $this->wc );
-			$this->wc->save();
+			$this->wc?->save();
 		}
 	}
 }

@@ -44,6 +44,8 @@ class ShippingOptions extends Resource {
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
+	 *
+	 * @return array{ shipping_rate_id: ?string }|array{ shipping_rate_data: ShippingRate }
 	 */
 	public function jsonSerialize(): array {
 		if ( null !== $this->id() ) {
@@ -60,14 +62,14 @@ class ShippingOptions extends Resource {
 	/**
 	 * Create a new Shipping Option from the Flex API response.
 	 *
-	 * @param array $shipping_option A shipping option from the API response.
+	 * @param array<string, mixed> $shipping_option A shipping option from the API response.
 	 */
-	public static function from_flex( array $shipping_option ) {
+	public static function from_flex( array $shipping_option ): self {
 		return new self(
 			new ShippingRate(
 				display_name: '',
-				amount: $shipping_option['shipping_amount'] ?? 0,
-				id: $shipping_option['shipping_rate_id'] ?? null,
+				amount: isset( $shipping_option['shipping_amount'] ) && is_int( $shipping_option['shipping_amount'] ) ? $shipping_option['shipping_amount'] : 0,
+				id: isset( $shipping_option['shipping_rate_id'] ) && is_string( $shipping_option['shipping_rate_id'] ) ? $shipping_option['shipping_rate_id'] : null,
 			),
 		);
 	}

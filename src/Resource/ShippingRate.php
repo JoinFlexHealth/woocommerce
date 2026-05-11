@@ -38,6 +38,8 @@ class ShippingRate extends Resource {
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
+	 *
+	 * @return array{ display_name: string, amount: int }
 	 */
 	public function jsonSerialize(): array {
 		return array(

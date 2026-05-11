@@ -26,8 +26,9 @@ class PaymentMethod extends AbstractPaymentMethodType {
 	/**
 	 * {@inheritdoc}
 	 */
-	public function initialize() {
-		$this->settings = get_option( 'woocommerce_flex_settings', array() );
+	public function initialize(): void {
+		$settings       = get_option( 'woocommerce_flex_settings', array() );
+		$this->settings = is_array( $settings ) ? $settings : array();
 	}
 
 	/**
@@ -41,11 +42,12 @@ class PaymentMethod extends AbstractPaymentMethodType {
 	 * {@inheritdoc}
 	 */
 	public function get_payment_method_script_handles() {
-		$plugin = get_plugin_data( PLUGIN_FILE );
+		$plugin_file = PLUGIN_FILE;
+		$plugin      = get_plugin_data( $plugin_file );
 
 		wp_register_script(
 			'flex',
-			plugins_url( '/build/index.js', PLUGIN_FILE ),
+			plugins_url( '/build/index.js', $plugin_file ),
 			array( 'wc-blocks-registry', 'wp-i18n' ),
 			$plugin['Version'],
 			true,
@@ -65,6 +67,8 @@ class PaymentMethod extends AbstractPaymentMethodType {
 
 	/**
 	 * {@inheritdoc}
+	 *
+	 * @return array{ supports: string[] }
 	 */
 	public function get_payment_method_data() {
 		return array(

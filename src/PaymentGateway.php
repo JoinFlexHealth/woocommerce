@@ -43,7 +43,7 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	/**
 	 * {@inheritdoc}
 	 *
-	 * @var array
+	 * @var array<string>
 	 */
 	public $supports = array( 'products', 'refunds' );
 
@@ -64,13 +64,13 @@ class PaymentGateway extends \WC_Payment_Gateway {
 
 		$this->init_settings();
 
-		if ( did_action( 'init' ) ) {
+		if ( did_action( 'init' ) > 0 ) {
 			$this->init();
 		}
 
 		if ( $actions ) {
 			// Translation cannot be used until after `init`.
-			if ( ! did_action( 'init' ) ) {
+			if ( 0 === did_action( 'init' ) ) {
 				add_action( 'init', array( $this, 'init' ) );
 			}
 			// @phpstan-ignore return.void
@@ -83,7 +83,7 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	/**
 	 * Initialize the Payment Gateway.
 	 */
-	public function init() {
+	public function init(): void {
 		$this->title              = __( 'Flex | Pay with HSA/FSA', 'pay-with-flex' );
 		$this->method_title       = __( 'Flex', 'pay-with-flex' );
 		$this->method_description = __( 'Accept HSA/FSA payments directly in the checkout flow.', 'pay-with-flex' );
@@ -94,6 +94,7 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	 * {@inheritdoc}
 	 *
 	 * @param int $order_id The id of the order.
+	 * @return array{ result: string, redirect: ?string, order_id: int }
 	 * @throws FlexException When WP_DEBUG & WP_DEBUG_DISPLAY are enabled.
 	 * @throws \Exception When something goes wrong.
 	 */
@@ -122,19 +123,25 @@ class PaymentGateway extends \WC_Payment_Gateway {
 		);
 
 		$order = wc_get_order( $order_id );
+		if ( ! $order instanceof \WC_Order ) {
+			throw new FlexException( message: 'Order not found', context: array( 'order_id' => $order_id ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+		}
 
 		sentry()->configureScope(
 			function ( Scope $scope ) use ( $order ): void {
-				$scope->setContext(
-					'Order',
-					array_merge(
-						$order->get_base_data(),
-						array(
-							'line_items' => array_map( fn( $item ) => $item->get_data(), $order->get_items() ),
-							'total'      => $order->get_total(),
-						)
+				/**
+				 * Order context for Sentry.
+				 *
+				 * @var array<string, mixed> $order_context
+				 */
+				$order_context = array_merge(
+					$order->get_base_data(),
+					array(
+						'line_items' => array_map( fn( $item ) => $item->get_data(), $order->get_items() ),
+						'total'      => $order->get_total(),
 					)
 				);
+				$scope->setContext( 'Order', $order_context );
 			},
 		);
 
@@ -152,8 +159,8 @@ class PaymentGateway extends \WC_Payment_Gateway {
 				function ( Scope $scope ) use ( $checkout_session ): void {
 					$scope->setTags(
 						array(
-							'checkout_session'           => $checkout_session->id(),
-							'checkout_session.test_mode' => wc_bool_to_string( $checkout_session->test_mode() ),
+							'checkout_session'           => $checkout_session->id() ?? '',
+							'checkout_session.test_mode' => wc_bool_to_string( $checkout_session->test_mode() ?? false ),
 						)
 					);
 
@@ -254,13 +261,19 @@ class PaymentGateway extends \WC_Payment_Gateway {
 
 		try {
 			$order = wc_get_order( $order_id );
+			if ( ! $order instanceof \WC_Order ) {
+				throw new FlexException( message: 'Order not found', context: array( 'order_id' => $order_id ) );
+			}
 
 			sentry()->configureScope(
 				function ( Scope $scope ) use ( $order ): void {
-					$scope->setContext(
-						'Order',
-						$order->get_base_data(),
-					);
+					/**
+					 * Order context for Sentry.
+					 *
+					 * @var array<string, mixed> $order_context
+					 */
+					$order_context = $order->get_base_data();
+					$scope->setContext( 'Order', $order_context );
 				},
 			);
 
@@ -270,8 +283,8 @@ class PaymentGateway extends \WC_Payment_Gateway {
 				function ( Scope $scope ) use ( $checkout_session ): void {
 					$scope->setTags(
 						array(
-							'checkout_session'           => $checkout_session->id(),
-							'checkout_session.test_mode' => wc_bool_to_string( $checkout_session->test_mode() ),
+							'checkout_session'           => $checkout_session->id() ?? '',
+							'checkout_session.test_mode' => wc_bool_to_string( $checkout_session->test_mode() ?? false ),
 						)
 					);
 
@@ -294,10 +307,13 @@ class PaymentGateway extends \WC_Payment_Gateway {
 
 			sentry()->configureScope(
 				function ( Scope $scope ) use ( $refund ): void {
-					$scope->setContext(
-						'Refund',
-						$refund->get_base_data()
-					);
+					/**
+					 * Refund context for Sentry.
+					 *
+					 * @var array<string, mixed> $refund_context
+					 */
+					$refund_context = $refund->get_base_data();
+					$scope->setContext( 'Refund', $refund_context );
 				},
 			);
 
@@ -355,7 +371,7 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	 */
 	public function get_transaction_url( $order ) {
 		if ( ! ( $order instanceof \WC_Order ) ) {
-			return parent::get_transaction_url( $order );
+			return '';
 		}
 
 		$checkout_session = CheckoutSession::from_wc( $order );
@@ -366,15 +382,15 @@ class PaymentGateway extends \WC_Payment_Gateway {
 
 		$dashboard = defined( 'FLEX_DASHBOARD_URL' ) ? \FLEX_DASHBOARD_URL : 'https://dashboard.withflex.com';
 
-		return $dashboard . ( $checkout_session->test_mode() ? '/test' : '' ) . '/orders/' . $checkout_session->id();
+		return $dashboard . ( true === $checkout_session->test_mode() ? '/test' : '' ) . '/orders/' . $checkout_session->id();
 	}
 
 	/**
 	 * {@inheritdoc}
 	 *
-	 * @param string $key Field key.
-	 * @param array  $field Field array.
-	 * @param array  $post_data Posted data.
+	 * @param string               $key Field key.
+	 * @param array<string, mixed> $field Field array.
+	 * @param array<string, mixed> $post_data Posted data.
 	 * @return string
 	 * @throws \Exception If the payment method is being enabled, but the API key is not present or is invalid.
 	 */
@@ -390,14 +406,20 @@ class PaymentGateway extends \WC_Payment_Gateway {
 		}
 
 		$api_key = '';
-		if ( defined( 'FLEX_API_KEY' ) && is_string( \FLEX_API_KEY ) ) {
+		if ( defined( 'FLEX_API_KEY' ) ) {
 			$api_key = \FLEX_API_KEY;
-		} elseif ( defined( 'WC_FLEX_API_KEY' ) && is_string( \WC_FLEX_API_KEY ) ) {
+		} elseif ( defined( 'WC_FLEX_API_KEY' ) ) {
 			$api_key = \WC_FLEX_API_KEY;
 		} else {
 			// Retrieve the api key from the form.
 			try {
-				$api_key = $this->get_field_value( self::API_KEY, $this->get_form_fields()[ self::API_KEY ], $post_data );
+				/**
+				 * The API key form field definition.
+				 *
+				 * @var array<string, mixed> $api_key_field
+				 */
+				$api_key_field = $this->get_form_fields()[ self::API_KEY ];
+				$api_key       = $this->get_field_value( self::API_KEY, $api_key_field, $post_data );
 			} catch ( \Throwable $previous ) {
 				throw new \Exception(
 					message: 'Payment method cannot be enabled without an API Key',
@@ -406,7 +428,7 @@ class PaymentGateway extends \WC_Payment_Gateway {
 			}
 		}
 
-		if ( empty( $api_key ) ) {
+		if ( '' === $api_key ) {
 			throw new \Exception( 'Payment method cannot be enabled without an API Key' );
 		}
 
@@ -416,8 +438,8 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	/**
 	 * Initializes settings form fields.
 	 */
-	public function init_form_fields() {
-		$has_defined_key   = ( defined( 'FLEX_API_KEY' ) && is_string( \FLEX_API_KEY ) ) || ( defined( 'WC_FLEX_API_KEY' ) && is_string( \WC_FLEX_API_KEY ) );
+	public function init_form_fields(): void {
+		$has_defined_key   = defined( 'FLEX_API_KEY' ) || defined( 'WC_FLEX_API_KEY' );
 		$this->form_fields = array(
 			self::ENABLED => array(
 				'title'   => __( 'Enable/Disable', 'pay-with-flex' ),
@@ -438,7 +460,7 @@ class PaymentGateway extends \WC_Payment_Gateway {
 						return '';
 					}
 
-					$clean = $this->validate_text_field( self::API_KEY, $value );
+					$clean = $this->validate_text_field( self::API_KEY, is_string( $value ) ? $value : '' );
 
 					// If the API key field is empty, let the user continue.
 					if ( '' === $clean ) {
@@ -459,7 +481,7 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	 * {@inheritdoc}
 	 */
 	public function needs_setup() {
-		if ( empty( $this->api_key() ) ) {
+		if ( null === $this->api_key() || '' === $this->api_key() ) {
 			return true;
 		}
 
@@ -472,13 +494,13 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	 * @param array<string, mixed> $options The options to update.
 	 */
 	public function update_options( array $options ): bool {
-		if ( empty( $this->settings ) ) {
+		if ( array() === $this->settings ) {
 			$this->init_settings();
 		}
 
 		$this->settings = array_merge( $this->settings, $options );
 
-		return update_option( $this->get_option_key(), apply_filters( 'woocommerce_settings_api_sanitized_fields_' . $this->id, $this->settings ), 'yes' );
+		return update_option( $this->get_option_key(), apply_filters( 'woocommerce_settings_api_sanitized_fields_' . $this->id, $this->settings ), true );
 	}
 
 	/**
@@ -495,18 +517,18 @@ class PaymentGateway extends \WC_Payment_Gateway {
 
 		$this->settings = $settings;
 
-		return update_option( $this->get_option_key(), apply_filters( 'woocommerce_settings_api_sanitized_fields_' . $this->id, $this->settings ), 'yes' );
+		return update_option( $this->get_option_key(), apply_filters( 'woocommerce_settings_api_sanitized_fields_' . $this->id, $this->settings ), true );
 	}
 
 	/**
 	 * Returns the Flex API key.
 	 */
 	public function api_key(): ?string {
-		if ( defined( 'FLEX_API_KEY' ) && is_string( \FLEX_API_KEY ) ) {
+		if ( defined( 'FLEX_API_KEY' ) ) {
 			return \FLEX_API_KEY;
 		}
 
-		if ( defined( 'WC_FLEX_API_KEY' ) && is_string( \WC_FLEX_API_KEY ) ) {
+		if ( defined( 'WC_FLEX_API_KEY' ) ) {
 			return \WC_FLEX_API_KEY;
 		}
 
@@ -531,14 +553,19 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	 * Remove Flex from checkout if the currency is not USD.
 	 */
 	public function is_available(): bool {
-		$order_id = absint( get_query_var( 'order-pay' ) );
-		$currency = null;
+		$query_var = get_query_var( 'order-pay' );
+		$order_id  = is_numeric( $query_var ) ? absint( (int) $query_var ) : 0;
+		$currency  = null;
 
 		// Gets currency from "pay for order" page.
 		if ( 0 < $order_id ) {
-			$order    = wc_get_order( $order_id );
-			$currency = $order->get_currency();
-		} else {
+			$order = wc_get_order( $order_id );
+			if ( $order instanceof \WC_Order ) {
+				$currency = $order->get_currency();
+			}
+		}
+
+		if ( null === $currency ) {
 			// Get currency from the cart/session.
 			$currency = get_woocommerce_currency();
 		}

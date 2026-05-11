@@ -29,7 +29,7 @@ class Webhook extends Resource {
 	 *
 	 * @var WebhookEvent[]
 	 */
-	protected $events;
+	protected array $events;
 
 	/**
 	 * WooCommerce Flex Gateway
@@ -46,7 +46,6 @@ class Webhook extends Resource {
 	 * @param ?string         $signing_secret The signing secret of the webhook.
 	 * @param ?WebhookEvent[] $events The events the webhook is subscribed too.
 	 * @param ?bool           $test_mode Whether the webhook was created in test mode.
-	 * @throws \LogicException If $events does not consist of instances of `WebhookEvent`.
 	 */
 	public function __construct(
 		protected string $url,
@@ -55,15 +54,7 @@ class Webhook extends Resource {
 		?array $events = null,
 		protected ?bool $test_mode = null,
 	) {
-		if ( null !== $events && ! array_all( $events, fn ( $e ) => $e instanceof WebhookEvent ) ) {
-			throw new \LogicException( 'Webhook::$events must only contain instances of WebhookEvent' );
-		}
-
-		if ( null === $events ) {
-			$events = WebhookEvent::cases();
-		}
-
-		$this->events = $events;
+		$this->events = $events ?? WebhookEvent::cases();
 	}
 
 	/**
@@ -81,7 +72,7 @@ class Webhook extends Resource {
 	public function secret(): string {
 		$split = explode( '_', $this->signing_secret ?? '' );
 
-		if ( empty( $split[1] ) || ! is_string( $split[1] ) ) {
+		if ( ! isset( $split[1] ) || '' === $split[1] ) {
 			throw new FlexException( 'Webhook was received, but secret is not present.' );
 		}
 
@@ -98,6 +89,8 @@ class Webhook extends Resource {
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
+	 *
+	 * @return array{ url: string, events: WebhookEvent[] }
 	 */
 	public function jsonSerialize(): array {
 		return array(
@@ -109,11 +102,11 @@ class Webhook extends Resource {
 	/**
 	 * Create a new Webhook from the Flex API response.
 	 *
-	 * @param array $webhook A single webhook from the API response.
+	 * @param array<string, mixed> $webhook A single webhook from the API response.
 	 * @throws FlexException If the url is missing.
 	 */
 	public static function from_flex( array $webhook ): self {
-		if ( ! isset( $webhook['url'] ) ) {
+		if ( ! isset( $webhook['url'] ) || ! is_string( $webhook['url'] ) ) {
 			throw new FlexException( 'URL missing from webhook.' );
 		}
 
@@ -125,17 +118,28 @@ class Webhook extends Resource {
 	/**
 	 * Extracts the data from a Flex API response.
 	 *
-	 * @param array $webhook A single webhook from the API response.
+	 * @param array<string, mixed> $webhook A single webhook from the API response.
 	 */
-	protected function extract( array $webhook ) {
-		$this->id             = $webhook['webhook_id'] ?? $this->id;
-		$this->url            = $webhook['url'] ?? $this->url;
-		$this->signing_secret = $webhook['signing_secret'] ?? $this->signing_secret;
-		$this->test_mode      = $webhook['test_mode'] ?? $this->test_mode;
+	protected function extract( array $webhook ): void {
+		$this->id             = isset( $webhook['webhook_id'] ) && is_string( $webhook['webhook_id'] ) ? $webhook['webhook_id'] : $this->id;
+		$this->url            = isset( $webhook['url'] ) && is_string( $webhook['url'] ) ? $webhook['url'] : $this->url;
+		$this->signing_secret = isset( $webhook['signing_secret'] ) && is_string( $webhook['signing_secret'] ) ? $webhook['signing_secret'] : $this->signing_secret;
+		$this->test_mode      = isset( $webhook['test_mode'] ) && is_bool( $webhook['test_mode'] ) ? $webhook['test_mode'] : $this->test_mode;
 
-		if ( ! empty( $webhook['events'] ) && is_array( $webhook['events'] ) ) {
-			$this->events = array_reduce(
-				$webhook['events'],
+		if ( isset( $webhook['events'] ) && is_array( $webhook['events'] ) && array() !== $webhook['events'] ) {
+			/**
+			 * Raw event strings from the API.
+			 *
+			 * @var list<string> $events
+			 */
+			$events = $webhook['events'];
+			/**
+			 * Parsed webhook events.
+			 *
+			 * @var WebhookEvent[] $parsed_events
+			 */
+			$parsed_events = array_reduce(
+				$events,
 				function ( array $acc, string $value ): array {
 					$event = WebhookEvent::tryFrom( $value );
 					if ( null !== $event ) {
@@ -145,6 +149,7 @@ class Webhook extends Resource {
 				},
 				array(),
 			);
+			$this->events  = $parsed_events;
 		}
 	}
 
@@ -165,11 +170,11 @@ class Webhook extends Resource {
 		$signing_secret = $flex->get_option( $prefix . self::KEY_SIGNING_SECRET );
 
 		$webhook = new self(
-			id: empty( $id ) ? null : $id,
+			id: '' === $id ? null : $id,
 			url: get_rest_url(
 				path: WebhookController::NAMESPACE . ( $test_mode ? '/test/webhooks' : '/webhooks' ),
 			),
-			signing_secret: empty( $signing_secret ) ? null : $signing_secret,
+			signing_secret: '' === $signing_secret ? null : $signing_secret,
 			test_mode: $test_mode,
 		);
 
@@ -294,6 +299,7 @@ class Webhook extends Resource {
 	 *
 	 * @throws FlexException If anything goes wrong.
 	 * @throws FlexResponseException If the response is something other than a 404.
+	 * @throws \LogicException If an unhandled action is passed.
 	 */
 	public function exec( ResourceAction $action ): void {
 		if ( ! $this->can( $action ) ) {
@@ -338,6 +344,7 @@ class Webhook extends Resource {
 				match ( $action ) {
 					ResourceAction::CREATE =>  '/v1/webhooks',
 					ResourceAction::UPDATE, ResourceAction::DELETE =>  '/v1/webhooks/' . $this->id,
+					default => throw new \LogicException( 'Unhandled action' ),
 				},
 				array(
 					'method' => match ( $action ) {
@@ -355,11 +362,17 @@ class Webhook extends Resource {
 				return;
 			}
 
-			if ( ! isset( $data['webhook'] ) ) {
+			if ( ! isset( $data['webhook'] ) || ! is_array( $data['webhook'] ) ) {
 				throw new FlexException( 'Missing webhook in response.' );
 			}
 
-			$this->extract( $data['webhook'] );
+			/**
+			 * The webhook data from the API response.
+			 *
+			 * @var array<string, mixed> $webhook_data
+			 */
+			$webhook_data = $data['webhook'];
+			$this->extract( $webhook_data );
 
 			if ( null !== $this->wc ) {
 				$this->apply_to( $this->wc );
@@ -385,7 +398,7 @@ class Webhook extends Resource {
 		}
 
 		// Deactivate the existing Webhook.
-		if ( $existing ) {
+		if ( null !== $existing ) {
 			$existing->exec( ResourceAction::UPDATE );
 		}
 	}

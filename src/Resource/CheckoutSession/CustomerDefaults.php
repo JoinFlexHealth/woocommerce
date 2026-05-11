@@ -9,7 +9,7 @@ declare(strict_types=1);
 
 namespace Flex\Resource\CheckoutSession;
 
-use Flex\FlexException;
+use Flex\Exception\FlexException;
 use Flex\Resource\Resource;
 
 /**
@@ -52,6 +52,8 @@ class CustomerDefaults extends Resource {
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
+	 *
+	 * @return array{ customer_id?: string, email?: string, first_name?: string, last_name?: string, phone?: string }
 	 */
 	public function jsonSerialize(): array {
 		$data = array();
@@ -100,7 +102,7 @@ class CustomerDefaults extends Resource {
 	/**
 	 * Extract the values from a checkout session defaults API response.
 	 *
-	 * @param array $defaults The checkout session object returned from the API.
+	 * @param array<string, mixed> $defaults The checkout session object returned from the API.
 	 *
 	 * @throws FlexException If data is missing.
 	 */
@@ -113,15 +115,15 @@ class CustomerDefaults extends Resource {
 	/**
 	 * Extract the values from a checkout session defaults API response.
 	 *
-	 * @param array $defaults The checkout session object returned from the API.
+	 * @param array<string, mixed> $defaults The checkout session object returned from the API.
 	 *
 	 * @throws \Exception If data is missing.
 	 */
 	protected function extract( array $defaults ): void {
-		$this->id         = $defaults['customer_id'] ?? $this->id;
-		$this->email      = $defaults['email'] ?? $this->email;
-		$this->first_name = $defaults['first_name'] ?? $this->first_name;
-		$this->last_name  = $defaults['last_name'] ?? $this->last_name;
-		$this->phone      = $defaults['phone'] ?? $this->phone;
+		$this->id         = isset( $defaults['customer_id'] ) && is_string( $defaults['customer_id'] ) ? $defaults['customer_id'] : $this->id;
+		$this->email      = isset( $defaults['email'] ) && is_string( $defaults['email'] ) ? $defaults['email'] : $this->email;
+		$this->first_name = isset( $defaults['first_name'] ) && is_string( $defaults['first_name'] ) ? $defaults['first_name'] : $this->first_name;
+		$this->last_name  = isset( $defaults['last_name'] ) && is_string( $defaults['last_name'] ) ? $defaults['last_name'] : $this->last_name;
+		$this->phone      = isset( $defaults['phone'] ) && is_string( $defaults['phone'] ) ? $defaults['phone'] : $this->phone;
 	}
 }

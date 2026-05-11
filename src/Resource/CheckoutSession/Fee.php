@@ -19,9 +19,9 @@ class Fee extends Resource {
 	/**
 	 * WooCommerce Fee
 	 *
-	 * @var ?\WC_Order_item_Fee
+	 * @var ?\WC_Order_Item_Fee
 	 */
-	protected ?\WC_Order_item_Fee $wc = null;
+	protected ?\WC_Order_Item_Fee $wc = null;
 
 	/**
 	 * Creates the checkout session tax rate.
@@ -56,6 +56,8 @@ class Fee extends Resource {
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
+	 *
+	 * @return array{ amount: int, fee_type: string, name: ?string, description: ?string }
 	 */
 	public function jsonSerialize(): array {
 		return array(
@@ -69,23 +71,25 @@ class Fee extends Resource {
 	/**
 	 * Create a new Fee from the Flex API response.
 	 *
-	 * @param array $fee A tax rate from the API response.
+	 * @param array<string, mixed> $fee A fee from the API response.
 	 */
-	public static function from_flex( array $fee ) {
+	public static function from_flex( array $fee ): self {
+		$fee_type = $fee['fee_type'] ?? '';
+
 		return new self(
-			amount: $fee['amount'] ?? 0,
-			type: FeeType::tryFrom( $fee['fee_type'] ) ?? FeeType::CUSTOM,
-			name: $fee['name'] ?? null,
-			description: $fee['description'] ?? null,
+			amount: isset( $fee['amount'] ) && is_int( $fee['amount'] ) ? $fee['amount'] : 0,
+			type: is_string( $fee_type ) ? ( FeeType::tryFrom( $fee_type ) ?? FeeType::CUSTOM ) : FeeType::CUSTOM,
+			name: isset( $fee['name'] ) && is_string( $fee['name'] ) ? $fee['name'] : null,
+			description: isset( $fee['description'] ) && is_string( $fee['description'] ) ? $fee['description'] : null,
 		);
 	}
 
 	/**
 	 * Create a Fee from a WooCommerce Fee.
 	 *
-	 * @param \WC_Order_item_Fee $item The WooCommerce Fee.
+	 * @param \WC_Order_Item_Fee $item The WooCommerce Fee.
 	 */
-	public static function from_wc( \WC_Order_item_Fee $item ): self {
+	public static function from_wc( \WC_Order_Item_Fee $item ): self {
 		$fee = new self(
 			amount: self::currency_to_unit_amount( $item->get_amount() ),
 			name: $item->get_name(),

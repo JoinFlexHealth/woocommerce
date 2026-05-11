@@ -30,6 +30,8 @@ class FlexException extends \Exception {
 
 	/**
 	 * Returns the context of the exception.
+	 *
+	 * @return array<string, mixed>
 	 */
 	public function getContext(): array {
 		return $this->context;

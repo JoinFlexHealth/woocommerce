@@ -9,6 +9,8 @@ declare(strict_types=1);
 
 namespace Flex\Resource;
 
+use Flex\Exception\FlexException;
+
 /**
  * Flex Shipping Rate
  */
@@ -52,6 +54,8 @@ class Refund extends Resource {
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
+	 *
+	 * @return array{}
 	 */
 	public function jsonSerialize(): array {
 		return array();
@@ -60,18 +64,29 @@ class Refund extends Resource {
 	/**
 	 * Extract the values from a refund API response.
 	 *
-	 * @param array $refund The refund object returned from the API.
+	 * @param array<string, mixed> $refund The refund object returned from the API.
 	 */
 	protected function extract( array $refund ): void {
-		$this->id       = $refund['refund_id'] ?? $this->id;
-		$this->status   = RefundStatus::tryFrom( $refund['status'] ?? '' ) ?? $this->status;
-		$this->metadata = isset( $refund['metadata'] ) && is_array( $refund['metadata'] ) ? $refund['metadata'] : $this->metadata;
+		$this->id = isset( $refund['refund_id'] ) && is_string( $refund['refund_id'] ) ? $refund['refund_id'] : $this->id;
+
+		$status       = $refund['status'] ?? '';
+		$this->status = is_string( $status ) ? ( RefundStatus::tryFrom( $status ) ?? $this->status ) : $this->status;
+
+		if ( isset( $refund['metadata'] ) && is_array( $refund['metadata'] ) ) {
+			/**
+			 * Refund metadata from the API.
+			 *
+			 * @var array<string, string> $metadata
+			 */
+			$metadata       = $refund['metadata'];
+			$this->metadata = $metadata;
+		}
 	}
 
 	/**
 	 * Extract the values from a refund API response.
 	 *
-	 * @param array $refund The refund object returned from the API.
+	 * @param array<string, mixed> $refund The refund object returned from the API.
 	 *
 	 * @throws FlexException If data is missing.
 	 */

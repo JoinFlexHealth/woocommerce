@@ -50,6 +50,8 @@ class TaxRate extends Resource {
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
+	 *
+	 * @return array{ amount: int }
 	 */
 	public function jsonSerialize(): array {
 		return array(
@@ -60,11 +62,11 @@ class TaxRate extends Resource {
 	/**
 	 * Create a new Tax Rate from the Flex API response.
 	 *
-	 * @param array $tax_rate A tax rate from the API response.
+	 * @param array<string, mixed> $tax_rate A tax rate from the API response.
 	 */
-	public static function from_flex( array $tax_rate ) {
+	public static function from_flex( array $tax_rate ): self {
 		return new self(
-			amount: $tax_rate['amount'] ?? 0,
+			amount: isset( $tax_rate['amount'] ) && is_int( $tax_rate['amount'] ) ? $tax_rate['amount'] : 0,
 		);
 	}
 

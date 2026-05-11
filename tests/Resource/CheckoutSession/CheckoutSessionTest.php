@@ -34,7 +34,7 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 			status: Status::COMPLETE,
 		);
 
-		$this->assertSame( ResourceAction::NONE, $checkout_session->needs() );
+		self::assertSame( ResourceAction::NONE, $checkout_session->needs() );
 	}
 
 	/**
@@ -46,7 +46,7 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 			status: Status::OPEN,
 		);
 
-		$this->assertSame( ResourceAction::CREATE, $checkout_session->needs() );
+		self::assertSame( ResourceAction::CREATE, $checkout_session->needs() );
 	}
 
 	/**
@@ -58,7 +58,7 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 			status: null,
 		);
 
-		$this->assertSame( ResourceAction::CREATE, $checkout_session->needs() );
+		self::assertSame( ResourceAction::CREATE, $checkout_session->needs() );
 	}
 
 	/**
@@ -74,7 +74,7 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 			status: Status::OPEN,
 		);
 
-		$this->assertSame( ResourceAction::DEPENDENCY, $checkout_session->needs() );
+		self::assertSame( ResourceAction::DEPENDENCY, $checkout_session->needs() );
 	}
 
 	/**
@@ -90,7 +90,7 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 			discounts: array( $discount ),
 		);
 
-		$this->assertSame( ResourceAction::DEPENDENCY, $checkout_session->needs() );
+		self::assertSame( ResourceAction::DEPENDENCY, $checkout_session->needs() );
 	}
 
 	/**
@@ -109,7 +109,7 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 			status: Status::COMPLETE,
 		);
 
-		$this->assertSame(
+		self::assertSame(
 			ResourceAction::DEPENDENCY,
 			$checkout_session->needs(),
 			'Dependencies should be checked before status'
@@ -133,6 +133,6 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 			discounts: array( $discount ),
 		);
 
-		$this->assertSame( ResourceAction::NONE, $checkout_session->needs() );
+		self::assertSame( ResourceAction::NONE, $checkout_session->needs() );
 	}
 }

@@ -55,6 +55,11 @@ const PLUGIN_FILE = __FILE__;
  * not want to override. Therefore, only exceptions that explicitly use `captureException` will be logged.
  */
 function sentry(): HubInterface {
+	/**
+	 * The Sentry hub instance.
+	 *
+	 * @var ?HubInterface $hub
+	 */
 	static $hub = null;
 
 	if ( null === $hub ) {
@@ -85,7 +90,7 @@ function sentry(): HubInterface {
 
 					// There is no stack trace so record the event.
 					// We may need to extend the `Event` class and use `captureEvent` in place of `captureMessage`.
-					if ( null === $trace && empty( $exceptions ) ) {
+					if ( null === $trace && array() === $exceptions ) {
 						return $event;
 					}
 
@@ -136,7 +141,7 @@ function sentry(): HubInterface {
 						 *
 						 * @see https://github.com/getsentry/sentry-php/blob/4.11.1/src/Integration/RequestIntegration.php#L120-L166
 						 */
-						if ( empty( $event->getRequest() ) ) {
+						if ( array() === $event->getRequest() ) {
 							$request = ( new RequestFetcher() )->fetchRequest();
 							if ( null !== $request ) {
 								$headers = array();
@@ -144,7 +149,7 @@ function sentry(): HubInterface {
 								$header_names = array( 'host', 'user-agent', 'referer', 'origin' );
 								foreach ( $header_names as $name ) {
 									$values = $request->getHeader( $name );
-									if ( empty( $values ) ) {
+									if ( array() === $values ) {
 										continue;
 									}
 
@@ -157,7 +162,7 @@ function sentry(): HubInterface {
 									'headers' => $headers,
 								);
 
-								if ( $request->getUri()->getQuery() ) {
+								if ( '' !== $request->getUri()->getQuery() ) {
 									$request_data['query_string'] = $request->getUri()->getQuery();
 								}
 
@@ -170,8 +175,13 @@ function sentry(): HubInterface {
 						 *
 						 * @see https://github.com/getsentry/sentry-php/blob/4.11.1/src/Integration/ModulesIntegration.php#L36
 						 */
-						if ( empty( $event->getModules() ) ) {
+						if ( array() === $event->getModules() ) {
 
+							/**
+							 * Active plugin modules.
+							 *
+							 * @var array<string, string> $modules
+							 */
 							$modules = array();
 
 							if ( function_exists( 'wp_get_wp_version' ) ) {
@@ -193,7 +203,7 @@ function sentry(): HubInterface {
 								$modules[ $theme->get_stylesheet() ] = $theme->version;
 							}
 
-							$event->setModules( $modules );
+							$event->setModules( $modules ); // @phpstan-ignore argument.type
 						}
 
 						/**
@@ -243,15 +253,15 @@ function sentry(): HubInterface {
  *
  * @param \WC_Payment_Gateways $gateways The payment gateways that were initialzed by WooCommerce.
  */
-function payment_gateways_initialized( \WC_Payment_Gateways $gateways ) {
+function payment_gateways_initialized( \WC_Payment_Gateways $gateways ): void {
 	$flex = $gateways->payment_gateways()['flex'] ?? null;
 
-	if ( ! $flex ) {
+	if ( ! $flex instanceof PaymentGateway ) {
 		return;
 	}
 
 	sentry()->configureScope(
-		fn ( $scope ) => $scope->setTag( 'flex.test_mode', wc_bool_to_string( $flex->is_in_test_mode() ) )
+		fn ( Scope $scope ) => $scope->setTag( 'flex.test_mode', wc_bool_to_string( $flex->is_in_test_mode() ) )
 	);
 }
 add_action(
@@ -262,7 +272,7 @@ add_action(
 /**
  * Activate the plugin.
  */
-function activate() {
+function activate(): void {
 	sentry()->captureMessage(
 		message: 'Plugin activated',
 		level: Severity::info(),
@@ -279,7 +289,7 @@ register_activation_hook(
 /**
  * Deactivate the plugin.
  */
-function deactivate() {
+function deactivate(): void {
 	sentry()->captureMessage(
 		message: 'Plugin deactivated',
 		level: Severity::warning(),
@@ -291,7 +301,7 @@ function deactivate() {
 	$gateway->init_settings();
 
 	// If there is no API Key available, there is nothing more that can be done.
-	if ( empty( $gateway->api_key() ) ) {
+	if ( null === $gateway->api_key() || '' === $gateway->api_key() ) {
 		return;
 	}
 
@@ -306,10 +316,10 @@ register_deactivation_hook(
 /**
  * Enqueue an async action with an exponential back-off.
  *
- * @param string $hook The hook for {@link as_enqueue_async_action}.
- * @param array  $args The args for {@link as_enqueue_async_action}.
- * @param string $group The group for {@link as_enqueue_async_action}.
- * @param int    $retries The number of retries that have been attempted.
+ * @param string       $hook    The hook for {@link as_enqueue_async_action}.
+ * @param array<mixed> $args    The args for {@link as_enqueue_async_action}.
+ * @param string       $group   The group for {@link as_enqueue_async_action}.
+ * @param int          $retries The number of retries that have been attempted.
  */
 function flex_enqueue_async_action( string $hook, array $args = array(), string $group = '', int $retries = 0 ): void {
 	// After 10 retries, something is seriously wrong.
@@ -322,13 +332,19 @@ function flex_enqueue_async_action( string $hook, array $args = array(), string 
 			'orderby'  => 'date',
 			'order'    => 'DESC',
 		);
-		if ( ! empty( $group ) ) {
+		if ( '' !== $group ) {
 			$query_args['group'] = $group;
 		}
 		$previous_actions = as_get_scheduled_actions( $query_args );
 
 		foreach ( $previous_actions as $action_id => $action ) {
-			$scheduled = $action->get_schedule()?->get_date();
+			/**
+				* The scheduled action.
+				*
+				* @var \ActionScheduler_Action $action
+				*/
+			$schedule  = $action->get_schedule();
+			$scheduled = $schedule->get_date(); // @phpstan-ignore method.notFound
 
 			sentry()->addBreadcrumb(
 				new Breadcrumb(
@@ -340,7 +356,7 @@ function flex_enqueue_async_action( string $hook, array $args = array(), string 
 						'action_id'    => $action_id,
 						'hook'         => $action->get_hook(),
 						'status'       => 'failed',
-						'scheduled_at' => $scheduled ? $scheduled->format( 'c' ) : null,
+						'scheduled_at' => $scheduled instanceof \DateTimeInterface ? $scheduled->format( 'c' ) : null,
 						'args'         => $action->get_args(),
 					),
 				)
@@ -351,7 +367,7 @@ function flex_enqueue_async_action( string $hook, array $args = array(), string 
 			function ( Scope $scope ) use ( $hook, $group, $args, $retries ) {
 				$scope->setTag( 'async_action.hook', $hook );
 
-				if ( ! empty( $group ) ) {
+				if ( '' !== $group ) {
 					$scope->setTag( 'async_action.group', $group );
 				}
 
@@ -458,12 +474,12 @@ function flex_update_coupon_async( int $product_id, int $retries = 0 ): void {
 function flex_update_product( int $product_id, int $retries = 0 ): void {
 	try {
 		$gateway = payment_gateway();
-		if ( empty( $gateway->api_key() ) ) {
+		if ( null === $gateway->api_key() || '' === $gateway->api_key() ) {
 			throw new FlexException( 'API Key is not set' );
 		}
 
 		$product = wc_get_product( $product_id );
-		if ( ! $product ) {
+		if ( ! $product instanceof \WC_Product ) {
 			return;
 		}
 
@@ -492,12 +508,12 @@ add_action(
 function flex_update_price( int $product_id, int $retries = 0 ): void {
 	try {
 		$gateway = payment_gateway();
-		if ( empty( $gateway->api_key() ) ) {
+		if ( null === $gateway->api_key() || '' === $gateway->api_key() ) {
 			throw new FlexException( 'API Key is not set' );
 		}
 
 		$product = wc_get_product( $product_id );
-		if ( ! $product ) {
+		if ( ! $product instanceof \WC_Product ) {
 			return;
 		}
 
@@ -526,12 +542,12 @@ add_action(
 function flex_update_coupon( int $product_id, int $retries = 0 ): void {
 	try {
 		$gateway = payment_gateway();
-		if ( empty( $gateway->api_key() ) ) {
+		if ( null === $gateway->api_key() || '' === $gateway->api_key() ) {
 			throw new FlexException( 'API Key is not set' );
 		}
 
 		$product = wc_get_product( $product_id );
-		if ( ! $product ) {
+		if ( ! $product instanceof \WC_Product ) {
 			return;
 		}
 
@@ -558,7 +574,7 @@ add_action(
  */
 function wc_update_product( int $product_id, \WC_Product $product ): void {
 	$gateway = payment_gateway();
-	if ( empty( $gateway->api_key() ) ) {
+	if ( null === $gateway->api_key() || '' === $gateway->api_key() ) {
 		return;
 	}
 
@@ -583,16 +599,19 @@ function wc_update_product( int $product_id, \WC_Product $product ): void {
 	$variation_ids = $product->get_children();
 	foreach ( $variation_ids as $variation_id ) {
 		$variation = wc_get_product( $variation_id );
+		if ( ! $variation instanceof \WC_Product ) {
+			continue;
+		}
 
 		$price = Price::from_wc( $variation );
 		if ( $price->can( $price->needs() ) ) {
-			flex_update_price_async( $variation_id );
+			flex_update_price_async( intval( $variation_id ) );
 			continue;
 		}
 
 		$coupon = Coupon::from_wc( $variation );
 		if ( $coupon->can( $coupon->needs() ) ) {
-			flex_update_coupon_async( $variation_id );
+			flex_update_coupon_async( intval( $variation_id ) );
 			continue;
 		}
 	}
@@ -618,7 +637,7 @@ add_action(
  */
 function wc_update_product_variation( int $product_id, \WC_Product $product ): void {
 	$gateway = payment_gateway();
-	if ( empty( $gateway->api_key() ) ) {
+	if ( null === $gateway->api_key() || '' === $gateway->api_key() ) {
 		return;
 	}
 
@@ -655,13 +674,13 @@ add_action(
 function post_update( int $post_id ): void {
 	$post = get_post( $post_id );
 
-	if ( ! $post ) {
+	if ( null === $post ) {
 		return;
 	}
 
 	if ( 'product' === $post->post_type || 'product_variation' === $post->post_type ) {
 		$product = wc_get_product( $post );
-		if ( ! $product ) {
+		if ( ! $product instanceof \WC_Product ) {
 			return;
 		}
 
@@ -692,7 +711,7 @@ add_action(
 function flex_update_webhook( int $retries = 0 ): void {
 	try {
 		$gateway = payment_gateway();
-		if ( empty( $gateway->api_key() ) ) {
+		if ( null === $gateway->api_key() || '' === $gateway->api_key() ) {
 			throw new FlexException( 'API Key is not set' );
 		}
 
@@ -768,7 +787,7 @@ function flex_product_sync_spawn( int $page, int $retries = 0 ): void {
 function flex_product_sync( int $page, int $retries = 0 ): void {
 	try {
 		$gateway = payment_gateway();
-		if ( empty( $gateway->api_key() ) ) {
+		if ( null === $gateway->api_key() || '' === $gateway->api_key() ) {
 			throw new FlexException( 'API Key is not set' );
 		}
 
@@ -808,7 +827,7 @@ function payment_method_enabled(): void {
 	$gateway->init_settings();
 
 		// If no API key is present, then there is nothing to do.
-	if ( empty( $gateway->api_key() ) ) {
+	if ( null === $gateway->api_key() || '' === $gateway->api_key() ) {
 		return;
 	}
 
@@ -818,6 +837,11 @@ function payment_method_enabled(): void {
 		flex_update_webhook_async();
 	}
 
+	/**
+	 * Paginated product query result.
+	 *
+	 * @var \stdClass $result
+	 */
 	$result = wc_get_products(
 		array(
 			'type'     => array_merge( Product::WC_TYPES, Price::WC_TYPES ),
@@ -865,13 +889,13 @@ function update_option_wc_flex_settings( mixed $old_value, mixed $value ): void 
 		return;
 	}
 
-	if ( 'yes' === $value['enabled'] && ( null === $old_value || ! isset( $old_value['enabled'] ) || 'no' === $old_value['enabled'] ) ) {
+	if ( 'yes' === $value['enabled'] && ( ! is_array( $old_value ) || ! isset( $old_value['enabled'] ) || 'no' === $old_value['enabled'] ) ) {
 		sentry()->captureMessage(
 			message: 'Payment method enabled',
 			level: Severity::info(),
 		);
 		payment_method_enabled();
-	} elseif ( 'no' === $value['enabled'] && 'yes' === $old_value['enabled'] ) {
+	} elseif ( 'no' === $value['enabled'] && is_array( $old_value ) && 'yes' === $old_value['enabled'] ) {
 		payment_method_disabled();
 	}
 }
@@ -914,6 +938,7 @@ add_action(
  * Register the Payment Gateway.
  *
  * @param string[] $methods An array of Payment method classes.
+ * @return string[]
  */
 function wc_payment_gateways( array $methods = array() ): array {
 	return array( ...$methods, PaymentGateway::class );
@@ -928,10 +953,10 @@ add_filter(
  *
  * @param PaymentMethodRegistry $payment_method_registry The WooCommerce payment method registry.
  */
-function wc_blocks_payment_method_type_registration( PaymentMethodRegistry $payment_method_registry ) {
+function wc_blocks_payment_method_type_registration( PaymentMethodRegistry $payment_method_registry ): void {
 	$payment_method_registry->register( new PaymentMethod() );
 }
-add_filter(
+add_action(
 	hook_name: 'woocommerce_blocks_payment_method_type_registration',
 	callback: __NAMESPACE__ . '\wc_blocks_payment_method_type_registration',
 );

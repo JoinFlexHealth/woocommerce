@@ -66,6 +66,8 @@ class LineItem extends Resource {
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
+	 *
+	 * @return array{ quantity: int, price: ?string }
 	 */
 	public function jsonSerialize(): array {
 		return array(
@@ -77,13 +79,20 @@ class LineItem extends Resource {
 	/**
 	 * Create a new Line Item from the Flex API response.
 	 *
-	 * @param array $line_item A single line item from the API response.
+	 * @param array<string, mixed> $line_item A single line item from the API response.
 	 */
-	public static function from_flex( array $line_item ) {
+	public static function from_flex( array $line_item ): self {
+		/**
+		 * Price data from the API response.
+		 *
+		 * @var array<string, mixed>|string|null $price_data
+		 */
+		$price_data = $line_item['price'] ?? null;
+
 		return new self(
-			id: $line_item['line_item_id'] ?? null,
-			price: isset( $line_item['price'] ) ? Price::from_flex( $line_item['price'] ) : null,
-			quantity: $line_item['quantity'] ?? null,
+			id: isset( $line_item['line_item_id'] ) && is_string( $line_item['line_item_id'] ) ? $line_item['line_item_id'] : null,
+			price: null !== $price_data ? Price::from_flex( $price_data ) : new Price(),
+			quantity: isset( $line_item['quantity'] ) && is_int( $line_item['quantity'] ) ? $line_item['quantity'] : 1,
 		);
 	}
 
@@ -99,7 +108,8 @@ class LineItem extends Resource {
 		$meta_key  = self::META_PREFIX . self::KEY_PRICE;
 		if ( OrderStatus::PENDING !== $item->get_order()->get_status()
 			&& $item->meta_exists( $meta_key ) ) {
-			$stored_id = $item->get_meta( $meta_key );
+			$meta      = $item->get_meta( $meta_key );
+			$stored_id = is_string( $meta ) ? $meta : null;
 		}
 
 		$line_item = new self(
@@ -135,7 +145,7 @@ class LineItem extends Resource {
 		}
 
 		$this->apply_to( $this->wc );
-		$this->wc->save();
+		$this->wc?->save();
 	}
 
 	/**

@@ -32,13 +32,15 @@ class LineItemTest extends \WP_UnitTestCase {
 		$product->save();
 
 		// Create a pending order with the product.
-		$order   = wc_create_order();
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
 		$item_id = $order->add_product( $product, 1 );
 		$order->set_status( OrderStatus::PENDING );
 		$order->save();
 
 		// Get the line item.
 		$item = $order->get_item( $item_id );
+		assert( $item instanceof \WC_Order_Item_Product );
 
 		// Store a price id in metadata to simulate previous checkout attempt.
 		$item->update_meta_data( '_wc_flex_line_item_price', 'price_test_456' );
@@ -58,12 +60,13 @@ class LineItemTest extends \WP_UnitTestCase {
 			$reflection  = new \ReflectionClass( $price );
 			$property    = $reflection->getProperty( 'product' );
 			$product_obj = $property->getValue( $price );
+			self::assertInstanceOf( \Flex\Resource\Product::class, $product_obj );
 
 			// The product should have a resolvable needs() - not NONE with null id.
 			$product_needs = $product_obj->needs();
 			$product_id    = $product_obj->id();
 
-			$this->assertFalse(
+			self::assertFalse(
 				ResourceAction::NONE === $product_needs && null === $product_id,
 				'Price has DEPENDENCY but Product cannot be resolved (needs=NONE, id=null). This would cause infinite recursion.'
 			);
@@ -71,10 +74,10 @@ class LineItemTest extends \WP_UnitTestCase {
 
 		// Verify the price has the expected unit amount from the product.
 		$json = $price->jsonSerialize();
-		$this->assertSame( 5000, $json['unit_amount'], 'Price should have correct unit amount from product' );
+		self::assertSame( 5000, $json['unit_amount'], 'Price should have correct unit amount from product' );
 
 		// For pending orders, the stored price ID should NOT be used.
-		$this->assertNotSame( 'price_test_456', $price->id(), 'Pending orders should not use stored price ID' );
+		self::assertNotSame( 'price_test_456', $price->id(), 'Pending orders should not use stored price ID' );
 	}
 
 	/**
@@ -91,13 +94,15 @@ class LineItemTest extends \WP_UnitTestCase {
 		$product->save();
 
 		// Create a processing order (payment was completed).
-		$order   = wc_create_order();
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
 		$item_id = $order->add_product( $product, 1 );
 		$order->set_status( OrderStatus::PROCESSING );
 		$order->save();
 
 		// Get the line item.
 		$item = $order->get_item( $item_id );
+		assert( $item instanceof \WC_Order_Item_Product );
 
 		// Store the price id that was saved during the original checkout.
 		$item->update_meta_data( '_wc_flex_line_item_price', 'price_original_checkout_789' );
@@ -108,11 +113,11 @@ class LineItemTest extends \WP_UnitTestCase {
 
 		// For non-pending orders with stored metadata, the stored price ID should be used.
 		$price = $line_item->price();
-		$this->assertSame( 'price_original_checkout_789', $price->id(), 'Non-pending orders should use stored price ID for refunds' );
+		self::assertSame( 'price_original_checkout_789', $price->id(), 'Non-pending orders should use stored price ID for refunds' );
 
 		// The price should still have the correct unit amount.
 		$json = $price->jsonSerialize();
-		$this->assertSame( 7500, $json['unit_amount'], 'Price should have correct unit amount' );
+		self::assertSame( 7500, $json['unit_amount'], 'Price should have correct unit amount' );
 	}
 
 	/**
@@ -126,21 +131,23 @@ class LineItemTest extends \WP_UnitTestCase {
 		$product->save();
 
 		// Create an order with the product (no stored metadata).
-		$order   = wc_create_order();
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
 		$item_id = $order->add_product( $product, 2 );
 		$order->save();
 
 		// Get the line item.
 		$item = $order->get_item( $item_id );
+		assert( $item instanceof \WC_Order_Item_Product );
 
 		// Create LineItem from WC item.
 		$line_item = LineItem::from_wc( $item );
 
 		// Verify quantity is correct.
-		$this->assertSame( 2, $line_item->quantity() );
+		self::assertSame( 2, $line_item->quantity() );
 
 		// Verify price has correct unit amount.
 		$json = $line_item->price()->jsonSerialize();
-		$this->assertSame( 2500, $json['unit_amount'] );
+		self::assertSame( 2500, $json['unit_amount'] );
 	}
 }

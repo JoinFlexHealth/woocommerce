@@ -17,11 +17,11 @@ $excluded_files = array(
 
 // Add all files from symfony/polyfill-php84 to exclusions.
 $exclude_finder = Finder::create() // @phpstan-ignore class.notFound
-	->files()
-	->in( __DIR__ . '/vendor/symfony/polyfill-*' );
+	->files() // @phpstan-ignore method.nonObject
+	->in( __DIR__ . '/vendor/symfony/polyfill-*' ); // @phpstan-ignore method.nonObject
 
-foreach ( $exclude_finder as $file ) {
-	$excluded_files[] = str_replace( __DIR__ . '/', '', $file->getPathname() );
+foreach ( $exclude_finder as $file ) { // @phpstan-ignore foreach.nonIterable
+	$excluded_files[] = str_replace( __DIR__ . '/', '', $file->getPathname() ); // @phpstan-ignore method.nonObject, argument.type
 }
 
 $excluded = array();
@@ -46,7 +46,14 @@ foreach ( $dirs as $dir ) {
 					continue;
 		}
 		$file_path = $dir . '/' . $file;
-		$symbols   = json_decode( file_get_contents( $file_path ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$content   = file_get_contents( $file_path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		if ( false === $content ) {
+			continue;
+		}
+		$symbols = json_decode( $content, true );
+		if ( ! is_array( $symbols ) ) {
+			continue;
+		}
 
 		if ( str_ends_with( $file, '-classes.json' ) || str_ends_with( $file, '-interfaces.json' ) || str_ends_with( $file, '-traits.json' ) ) {
 			$excluded_classes = array_merge( $excluded_classes, $symbols );

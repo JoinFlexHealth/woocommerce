@@ -38,21 +38,19 @@ class Discount extends Resource {
 	 * {@inheritdoc}
 	 *
 	 * Only serialize properties where WooCommerce is the system of record.
+	 *
+	 * @return array{ coupon_id: ?string }|array{ coupon_data: Coupon }
 	 */
-	public function jsonSerialize(): ?array {
-		if ( $this->item instanceof Coupon ) {
-			if ( null !== $this->item->id() ) {
-				return array(
-					'coupon_id' => $this->item->id(),
-				);
-			}
-
+	public function jsonSerialize(): array {
+		if ( null !== $this->item->id() ) {
 			return array(
-				'coupon_data' => $this->item,
+				'coupon_id' => $this->item->id(),
 			);
 		}
 
-		return null;
+		return array(
+			'coupon_data' => $this->item,
+		);
 	}
 
 	/**
