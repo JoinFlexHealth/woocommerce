@@ -179,8 +179,14 @@ class Coupon extends Resource {
 		}
 
 		// Wait for the price to be updated if it needs to be.
-		if ( array_any( $this->applies_to, static fn ( $price ) => ResourceAction::NONE !== $price->needs() || null === $price->id() ) ) {
-			return ResourceAction::DEPENDENCY;
+		foreach ( $this->applies_to as $price ) {
+			if ( ResourceAction::NONE !== $price->needs() ) {
+				return ResourceAction::DEPENDENCY;
+			}
+			// Price is settled but has no ID — it can never be resolved (e.g. orphaned variation).
+			if ( null === $price->id() ) {
+				return ResourceAction::NONE;
+			}
 		}
 
 		if ( null === $this->id ) {

@@ -10,15 +10,44 @@ declare(strict_types=1);
 namespace Flex\Tests\Resource;
 
 use Flex\Resource\Price;
+use Flex\Resource\ResourceAction;
 
 /**
- * Test the Price::from_wc_item functionality.
- *
- * These tests verify that line item prices are correctly calculated when
- * the actual cart amount differs from the catalog price (e.g., due to add-ons,
- * dynamic pricing, or other modifications).
+ * Tests for the Price resource.
  */
 class PriceTest extends \WP_UnitTestCase {
+
+	/**
+	 * Test from_wc returns a no-op price for a variation whose parent product no longer exists.
+	 */
+	public function test_from_wc_returns_noop_for_orphaned_variation(): void {
+		// Create a variation pointing to a non-existent parent.
+		$variation = new \WC_Product_Variation();
+		$variation->set_parent_id( 999999 );
+		$variation->set_regular_price( '10.00' );
+		$variation->save();
+
+		$price = Price::from_wc( $variation );
+		self::assertSame( ResourceAction::NONE, $price->needs() );
+	}
+
+	/**
+	 * Test from_wc returns an actionable price for a variation with a valid parent product.
+	 */
+	public function test_from_wc_works_for_variation_with_valid_parent(): void {
+		$parent = new \WC_Product_Variable();
+		$parent->set_name( 'Variable Product' );
+		$parent->save();
+
+		$variation = new \WC_Product_Variation();
+		$variation->set_parent_id( $parent->get_id() );
+		$variation->set_regular_price( '25.00' );
+		$variation->save();
+
+		$price = Price::from_wc( $variation );
+		self::assertNotSame( ResourceAction::NONE, $price->needs() );
+	}
+
 
 	/**
 	 * Test from_wc_item when line item price matches catalog price.

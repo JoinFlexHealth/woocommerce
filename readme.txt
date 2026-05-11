@@ -58,6 +58,7 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 = 3.3.3 =
 * Added Sentry alert when async actions exhaust max retries for better production debugging.
 * Added static analysis at PHPStan max level with strict rules.
+* Fixed a retry storm caused by orphaned product variations whose parent product was deleted.
 * Fixed checkout rendering on PHP 8.4 caused by an uninitialized gateway description.
 
 = 3.3.2 =

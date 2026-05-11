@@ -85,11 +85,12 @@ class Price extends Resource implements ResourceInterface {
 	public static function from_wc( \WC_Product $product ): self {
 		$meta_prefix = self::meta_prefix();
 
-		$flex_product = null;
 		if ( ProductType::VARIATION === $product->get_type() ) {
 			$parent_product = wc_get_product( $product->get_parent_id() );
 			if ( $parent_product instanceof \WC_Product ) {
 				$flex_product = Product::from_wc( $parent_product );
+			} else {
+				$flex_product = new Product();
 			}
 		} else {
 			$flex_product = Product::from_wc( $product );
@@ -113,7 +114,7 @@ class Price extends Resource implements ResourceInterface {
 			id: $product->meta_exists( $meta_prefix . self::KEY_ID ) && is_string( $price_id_meta ) ? $price_id_meta : null,
 			active: $product->get_status() !== ProductStatus::TRASH,
 			description: '' !== $description ? trim( $description ) : null,
-			product: $flex_product ?? new Product(),
+			product: $flex_product,
 			unit_amount: self::currency_to_unit_amount( $product->get_regular_price() ),
 			hsa_fsa_eligibility: $product->meta_exists( $meta_prefix . self::KEY_HSA_FSA_ELIGIBILITY ) && is_string( $eligibility_meta ) ? $eligibility_meta : null,
 		);
@@ -242,6 +243,10 @@ class Price extends Resource implements ResourceInterface {
 	public function needs(): ResourceAction {
 		// Wait for a product id to be set.
 		if ( null === $this->product->id() ) {
+			// If the product doesn't need any action, it can never be resolved — skip.
+			if ( ResourceAction::NONE === $this->product->needs() ) {
+				return ResourceAction::NONE;
+			}
 			return ResourceAction::DEPENDENCY;
 		}
 
