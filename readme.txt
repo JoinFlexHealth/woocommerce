@@ -2,7 +2,7 @@
 Contributors: withflex, davidbarratt
 Tags: hsa, fsa, payments, woocommerce
 Requires at least: 6.7
-Tested up to: 6.9
+Tested up to: 7.0
 Stable tag: 3.3.3
 Requires PHP: 8.1
 License: GPLv3 or later
