@@ -8,16 +8,16 @@
     "packages": [
         {
             "name": "guzzlehttp/psr7",
-            "version": "2.10.2",
+            "version": "2.10.4",
             "source": {
                 "type": "git",
                 "url": "https://github.com/guzzle/psr7.git",
-                "reference": "a1bbdc172f32a25fe999965b65b6e71fd87da9ed"
+                "reference": "d2a1a094e396da8957e797489fddaf860c340cfc"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/guzzle/psr7/zipball/a1bbdc172f32a25fe999965b65b6e71fd87da9ed",
-                "reference": "a1bbdc172f32a25fe999965b65b6e71fd87da9ed",
+                "url": "https://api.github.com/repos/guzzle/psr7/zipball/d2a1a094e396da8957e797489fddaf860c340cfc",
+                "reference": "d2a1a094e396da8957e797489fddaf860c340cfc",
                 "shasum": ""
             },
             "require": {
@@ -105,7 +105,7 @@
             ],
             "support": {
                 "issues": "https://github.com/guzzle/psr7/issues",
-                "source": "https://github.com/guzzle/psr7/tree/2.10.2"
+                "source": "https://github.com/guzzle/psr7/tree/2.10.4"
             },
             "funding": [
                 {
@@ -121,7 +121,7 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-05-25T22:58:15+00:00"
+            "time": "2026-05-29T12:59:07+00:00"
         },
         {
             "name": "jean85/pretty-package-versions",
@@ -1550,7 +1550,6 @@
                     "type": "github"
                 }
             ],
-            "abandoned": true,
             "time": "2020-10-26T13:08:54+00:00"
         },
         {
@@ -1606,7 +1605,6 @@
                     "type": "github"
                 }
             ],
-            "abandoned": true,
             "time": "2020-09-28T05:30:19+00:00"
         },
         {
