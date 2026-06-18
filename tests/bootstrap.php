@@ -87,7 +87,12 @@ function _manually_load_plugin(): void {
 	}
 
 	WC_Install::create_tables();
-	// Loading the plugin creates a circular dependency with the composer autoloader.
+
+	// Load the plugin entrypoint so its hook registrations (add_action/add_filter)
+	// are active under test. WooCommerce is loaded above and the composer autoloader
+	// was required by this bootstrap, so the plugin's own require_once of it is a
+	// no-op — no circular dependency.
+	require_once dirname( __DIR__ ) . '/pay-with-flex.php';
 }
 
 tests_add_filter( 'muplugins_loaded', '_manually_load_plugin' );

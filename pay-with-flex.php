@@ -2,7 +2,7 @@
 /**
  * Plugin Name:      Flex HSA/FSA Payments
  * Description:      Accept HSA/FSA payments directly in the checkout flow.
- * Version:          3.3.3
+ * Version:          3.3.4
  * Plugin URI:       https://wordpress.org/plugins/pay-with-flex/
  * Author:           Flex
  * Author URI:       https://withflex.com/
@@ -28,6 +28,7 @@ use Flex\Resource\CheckoutSession\LineItem;
 use Flex\Resource\Coupon;
 use Flex\Resource\Price;
 use Flex\Resource\Product;
+use Flex\Resource\Resource;
 use Flex\Resource\ResourceAction;
 use Flex\Resource\Webhook;
 use Sentry\ClientBuilder;
@@ -662,6 +663,40 @@ add_action(
 	hook_name: 'woocommerce_new_product_variation',
 	callback: __NAMESPACE__ . '\wc_update_product_variation',
 	accepted_args: 2,
+);
+
+/**
+ * Strips Flex identity meta from a duplicated product or variation before it is saved.
+ *
+ * WooCommerce's "Duplicate product" deep-copies every post meta key, including the
+ * Flex price/product IDs and their reconciliation hashes. Left in place, the copy
+ * would claim a Flex price that belongs to the original — which checkout later sends
+ * as a stale `price_not_found` once the original's price is re-created or deactivated
+ * (MER-1371). Because Price/Product::needs() are local-only, the copy would also never
+ * be reconciled: it looks already-synced.
+ *
+ * Clearing the `_wc_flex_` meta (covers the `_wc_flex_test_` keys too) makes the copy
+ * look new, so the woocommerce_new_product / woocommerce_new_product_variation hooks
+ * that fire on the subsequent save provision a fresh Flex product and price for it.
+ *
+ * Fires for the parent and every variation via woocommerce_product_duplicate_before_save.
+ *
+ * @param \WC_Product $duplicate The product or variation copy about to be saved.
+ */
+function wc_product_duplicate_strip_flex_meta( \WC_Product $duplicate ): void {
+	foreach ( $duplicate->get_meta_data() as $meta ) {
+		if ( ! $meta instanceof \WC_Meta_Data ) {
+			continue;
+		}
+		$key = $meta->get_data()['key'] ?? null;
+		if ( is_string( $key ) && Resource::is_meta_key( $key ) ) {
+			$duplicate->delete_meta_data( $key );
+		}
+	}
+}
+add_action(
+	hook_name: 'woocommerce_product_duplicate_before_save',
+	callback: __NAMESPACE__ . '\wc_product_duplicate_strip_flex_meta',
 );
 
 /**

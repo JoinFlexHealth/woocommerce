@@ -11,6 +11,7 @@ namespace Flex\Resource\CheckoutSession;
 
 use Flex\Controller\Controller;
 use Flex\Exception\FlexException;
+use Flex\Exception\FlexResponseException;
 use Flex\Resource\Coupon;
 use Flex\Resource\Resource;
 use Flex\Resource\ResourceAction;
@@ -440,6 +441,7 @@ class CheckoutSession extends Resource {
 	 * @param ResourceAction $action The operation to perform.
 	 *
 	 * @throws FlexException If anything goes wrong.
+	 * @throws FlexResponseException If the API responds with an error that cannot be recovered.
 	 */
 	public function exec( ResourceAction $action ): void {
 		if ( ! $this->can( $action ) ) {
@@ -461,22 +463,45 @@ class CheckoutSession extends Resource {
 			return;
 		}
 
-		$data = $this->remote_request(
-			match ( $action ) {
-				ResourceAction::CREATE => '/v1/checkout/sessions',
-				default => '/v1/checkout/sessions/' . $this->id,
+		$path = match ( $action ) {
+			ResourceAction::CREATE => '/v1/checkout/sessions',
+			default => '/v1/checkout/sessions/' . $this->id,
+		};
+		$args = array(
+			'method' => match ( $action ) {
+				ResourceAction::CREATE => 'POST',
+				default => 'GET',
 			},
-			array(
-				'method' => match ( $action ) {
-					ResourceAction::CREATE => 'POST',
-					default => 'GET',
-				},
-				'flex'   => match ( $action ) {
-					ResourceAction::CREATE => array( 'data' => array( 'checkout_session' => $this ) ),
-					default => array(),
-				},
-			),
+			'flex'   => match ( $action ) {
+				ResourceAction::CREATE => array( 'data' => array( 'checkout_session' => $this ) ),
+				default => array(),
+			},
 		);
+
+		try {
+			$data = $this->remote_request( $path, $args );
+		} catch ( FlexResponseException $e ) {
+			// Recover from a stale price reference. A line item's stored price id no
+			// longer resolves on the Flex side (e.g. the product was duplicated, or
+			// its price was recreated and the old one deactivated), so the create
+			// returns 422 price_not_found. needs() is local-only and never caught it.
+			// The error does not name the offending price, so recreate every line
+			// item price and retry the create once. A second failure propagates. See MER-1371.
+			// code() returns wp_remote_retrieve_response_code() verbatim, which may be
+			// a numeric string or an int, so compare as int.
+			if ( ResourceAction::CREATE !== $action
+				|| 422 !== (int) $e->code()
+				|| 'price_not_found' !== $e->errorType() ) {
+				throw $e;
+			}
+
+			foreach ( $this->line_items as $line_item ) {
+				$line_item->price()->exec( ResourceAction::CREATE );
+			}
+
+			// $this re-serializes with the recreated price ids on this retry.
+			$data = $this->remote_request( $path, $args );
+		}
 
 		if ( ! isset( $data['checkout_session'] ) || ! is_array( $data['checkout_session'] ) ) {
 			throw new FlexException( 'Missing checkout_session in response.' );

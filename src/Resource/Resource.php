@@ -26,6 +26,17 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 	protected const META_PREFIX_TEST = self::META_PREFIX . 'test_';
 
 	/**
+	 * Determine whether a meta key belongs to Flex.
+	 *
+	 * Covers the `_wc_flex_test_` keys too, since META_PREFIX_TEST extends META_PREFIX.
+	 *
+	 * @param string $key The meta key to check.
+	 */
+	public static function is_meta_key( string $key ): bool {
+		return str_starts_with( $key, self::META_PREFIX );
+	}
+
+	/**
 	 * {@inheritdoc}
 	 *
 	 * @throws FlexException If JSON encoding fails.
