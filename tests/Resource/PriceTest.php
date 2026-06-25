@@ -18,6 +18,102 @@ use Flex\Resource\ResourceAction;
 class PriceTest extends \WP_UnitTestCase {
 
 	/**
+	 * Price::is_purchasable_unit returns true for purchasable leaves.
+	 */
+	public function test_is_purchasable_unit_true_for_simple_variation_bundle(): void {
+		$simple = new \WC_Product_Simple();
+		$simple->set_name( 'Simple' );
+		$simple->set_regular_price( '10.00' );
+		$simple->set_status( 'publish' );
+		$simple->save();
+		self::assertTrue( Price::is_purchasable_unit( $simple ) );
+
+		$parent = new \WC_Product_Variable();
+		$parent->set_name( 'Variable' );
+		$parent->set_status( 'publish' );
+		$parent->save();
+		$variation = new \WC_Product_Variation();
+		$variation->set_parent_id( $parent->get_id() );
+		$variation->set_regular_price( '10.00' );
+		$variation->set_status( 'publish' );
+		$variation->save();
+		\WC_Product_Variable::sync( $parent->get_id() );
+		$variation = wc_get_product( $variation->get_id() );
+		assert( $variation instanceof \WC_Product );
+		self::assertTrue( Price::is_purchasable_unit( $variation ) );
+
+		$bundle = new class() extends \WC_Product_Simple {
+			/**
+			 * Returns the product type slug.
+			 *
+			 * @return string
+			 */
+			public function get_type() {
+				return 'bundle';
+			}
+		};
+		$bundle->set_name( 'Kit' );
+		$bundle->set_regular_price( '0' );
+		$bundle->set_status( 'publish' );
+		$bundle->save();
+		self::assertTrue( Price::is_purchasable_unit( $bundle ) );
+	}
+
+	/**
+	 * Price::is_purchasable_unit returns false for containers and non-purchasable products.
+	 */
+	public function test_is_purchasable_unit_false_for_containers_and_external(): void {
+		$parent = new \WC_Product_Variable();
+		$parent->set_name( 'Variable' );
+		$parent->set_status( 'publish' );
+		$parent->save();
+		$variation = new \WC_Product_Variation();
+		$variation->set_parent_id( $parent->get_id() );
+		$variation->set_regular_price( '10.00' );
+		$variation->set_status( 'publish' );
+		$variation->save();
+		$parent = wc_get_product( $parent->get_id() );
+		assert( $parent instanceof \WC_Product );
+		self::assertFalse( Price::is_purchasable_unit( $parent ) );
+
+		$grouped = new \WC_Product_Grouped();
+		$grouped->set_name( 'Grouped' );
+		$grouped->set_status( 'publish' );
+		$grouped->save();
+		self::assertFalse( Price::is_purchasable_unit( $grouped ) );
+
+		$external = new \WC_Product_External();
+		$external->set_name( 'External' );
+		$external->set_regular_price( '10.00' );
+		$external->set_status( 'publish' );
+		$external->save();
+		self::assertFalse( Price::is_purchasable_unit( $external ) );
+	}
+
+	/**
+	 * Price::needs() returns NONE for a variable parent (its variations carry prices).
+	 *
+	 * Without the unit gate, needs() would create a spurious $0 price from the
+	 * parent's empty regular price.
+	 */
+	public function test_needs_none_for_variable_parent(): void {
+		$parent = new \WC_Product_Variable();
+		$parent->set_name( 'Variable' );
+		$parent->set_status( 'publish' );
+		$parent->save();
+
+		$variation = new \WC_Product_Variation();
+		$variation->set_parent_id( $parent->get_id() );
+		$variation->set_regular_price( '10.00' );
+		$variation->set_status( 'publish' );
+		$variation->save();
+
+		$parent = wc_get_product( $parent->get_id() );
+		assert( $parent instanceof \WC_Product );
+		self::assertSame( ResourceAction::NONE, Price::from_wc( $parent )->needs() );
+	}
+
+	/**
 	 * Test from_wc returns a no-op price for a variation whose parent product no longer exists.
 	 */
 	public function test_from_wc_returns_noop_for_orphaned_variation(): void {
@@ -26,6 +122,8 @@ class PriceTest extends \WP_UnitTestCase {
 		$variation->set_parent_id( 999999 );
 		$variation->set_regular_price( '10.00' );
 		$variation->save();
+		$variation = wc_get_product( $variation->get_id() );
+		assert( $variation instanceof \WC_Product );
 
 		$price = Price::from_wc( $variation );
 		self::assertSame( ResourceAction::NONE, $price->needs() );
@@ -44,10 +142,39 @@ class PriceTest extends \WP_UnitTestCase {
 		$variation->set_regular_price( '25.00' );
 		$variation->save();
 
+		\WC_Product_Variable::sync( $parent->get_id() );
+		$variation = wc_get_product( $variation->get_id() );
+		assert( $variation instanceof \WC_Product );
+
 		$price = Price::from_wc( $variation );
 		self::assertNotSame( ResourceAction::NONE, $price->needs() );
 	}
 
+
+	/**
+	 * A bundle-type product (no parent) resolves its Flex product to itself, so the
+	 * price has a syncable product and reports DEPENDENCY (product not yet created).
+	 * If routing wrongly treated it as a child, the product would be empty and
+	 * needs() would be NONE.
+	 */
+	public function test_from_wc_bundle_type_uses_self_as_product(): void {
+		$bundle = new class() extends \WC_Product_Simple {
+			/**
+			 * Returns the product type slug.
+			 *
+			 * @return string
+			 */
+			public function get_type() {
+				return 'bundle';
+			}
+		};
+		$bundle->set_name( 'Kit' );
+		$bundle->set_regular_price( '0' );
+		$bundle->set_status( 'publish' );
+		$bundle->save();
+
+		self::assertSame( ResourceAction::DEPENDENCY, Price::from_wc( $bundle )->needs() );
+	}
 
 	/**
 	 * Test from_wc_item when line item price matches catalog price.
@@ -254,6 +381,122 @@ class PriceTest extends \WP_UnitTestCase {
 		// And the correct amount.
 		$json = $price->jsonSerialize();
 		self::assertSame( 12500, $json['unit_amount'] );
+	}
+
+	/**
+	 * A trashed variation that was previously synced to Flex should return UPDATE
+	 * so the deactivation (active: false) is pushed for its price. Hash-gated so
+	 * exec(UPDATE) -> apply_to() makes the next sync NONE.
+	 */
+	public function test_needs_update_to_deactivate_trashed_synced_variation(): void {
+		$parent = new \WC_Product_Variable();
+		$parent->set_name( 'Variable Product' );
+		$parent->set_status( 'publish' );
+		$parent->save();
+
+		$variation = new \WC_Product_Variation();
+		$variation->set_parent_id( $parent->get_id() );
+		$variation->set_regular_price( '15.00' );
+		$variation->set_status( 'publish' );
+		$variation->save();
+
+		\WC_Product_Variable::sync( $parent->get_id() );
+
+		// Reload so is_purchasable() has parent_data populated.
+		$variation = wc_get_product( $variation->get_id() );
+		assert( $variation instanceof \WC_Product );
+
+		// Seed the "previously synced" state for the price.
+		( new \Flex\Resource\Price(
+			product: new \Flex\Resource\Product( id: 'fprod_1' ),
+			id: 'fprice_1',
+			active: true,
+			unit_amount: 1500,
+		) )->apply_to( $variation );
+		$variation->save();
+
+		// Trash the variation and reload.
+		$variation->set_status( 'trash' );
+		$variation->save();
+		$reloaded = wc_get_product( $variation->get_id() );
+		assert( $reloaded instanceof \WC_Product );
+
+		self::assertSame( ResourceAction::UPDATE, Price::from_wc( $reloaded )->needs() );
+	}
+
+	/**
+	 * A previously synced simple product moved to draft or private (unpublished, but
+	 * not trashed) is no longer purchasable, so needs() should return UPDATE to push
+	 * the deactivation (active: false). Regression for units that unpublish without
+	 * being trashed.
+	 *
+	 * @dataProvider unpublished_status_provider
+	 *
+	 * @param string $status The non-trash, non-publish status to apply.
+	 */
+	public function test_needs_update_to_deactivate_unpublished_synced_simple( string $status ): void {
+		$product = new \WC_Product_Simple();
+		$product->set_name( 'Simple' );
+		$product->set_regular_price( '20.00' );
+		$product->set_status( 'publish' );
+		$product->save();
+
+		$product = wc_get_product( $product->get_id() );
+		assert( $product instanceof \WC_Product );
+
+		// Seed the "previously synced" state for the price (active while published).
+		( new \Flex\Resource\Price(
+			product: new \Flex\Resource\Product( id: 'fprod_1' ),
+			id: 'fprice_1',
+			active: true,
+			unit_amount: 2000,
+		) )->apply_to( $product );
+		$product->save();
+
+		// Unpublish (draft/private) and reload.
+		$product->set_status( $status );
+		$product->save();
+		$reloaded = wc_get_product( $product->get_id() );
+		assert( $reloaded instanceof \WC_Product );
+
+		self::assertSame( ResourceAction::UPDATE, Price::from_wc( $reloaded )->needs() );
+	}
+
+	/**
+	 * Non-trash statuses that still make a product unpurchasable.
+	 *
+	 * @return array<string, array{string}>
+	 */
+	public static function unpublished_status_provider(): array {
+		return array(
+			'draft'   => array( 'draft' ),
+			'private' => array( 'private' ),
+		);
+	}
+
+	/**
+	 * A trashed variation with no Flex price id (never synced) should return NONE.
+	 */
+	public function test_needs_none_for_trashed_unsynced_variation(): void {
+		$parent = new \WC_Product_Variable();
+		$parent->set_name( 'Variable Parent' );
+		$parent->set_status( 'publish' );
+		$parent->save();
+
+		$variation = new \WC_Product_Variation();
+		$variation->set_parent_id( $parent->get_id() );
+		$variation->set_regular_price( '15.00' );
+		$variation->set_status( 'publish' );
+		$variation->save();
+
+		\WC_Product_Variable::sync( $parent->get_id() );
+
+		$variation->set_status( 'trash' );
+		$variation->save();
+		$reloaded = wc_get_product( $variation->get_id() );
+		assert( $reloaded instanceof \WC_Product );
+
+		self::assertSame( ResourceAction::NONE, Price::from_wc( $reloaded )->needs() );
 	}
 
 	/**

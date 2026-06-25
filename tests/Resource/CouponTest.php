@@ -45,6 +45,10 @@ class CouponTest extends \WP_UnitTestCase {
 		$variation->set_sale_price( '15.00' );
 		$variation->save();
 
+		\WC_Product_Variable::sync( $parent->get_id() );
+		$variation = wc_get_product( $variation->get_id() );
+		assert( $variation instanceof \WC_Product );
+
 		$coupon = Coupon::from_wc( $variation );
 		self::assertNotSame( ResourceAction::NONE, $coupon->needs() );
 	}

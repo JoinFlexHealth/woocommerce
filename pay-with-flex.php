@@ -2,7 +2,7 @@
 /**
  * Plugin Name:      Flex HSA/FSA Payments
  * Description:      Accept HSA/FSA payments directly in the checkout flow.
- * Version:          3.3.4
+ * Version:          3.3.5
  * Plugin URI:       https://wordpress.org/plugins/pay-with-flex/
  * Author:           Flex
  * Author URI:       https://withflex.com/
@@ -827,14 +827,14 @@ function flex_product_sync( int $page, int $retries = 0 ): void {
 		}
 
 		/**
-		 * Fetch all of the products we support.
+		 * Fetch all products regardless of type; non-syncable products are filtered
+		 * downstream by Product::needs() and Price::needs().
 		 *
 		 * @var \WC_Product[]
 		 */
 		$products = wc_get_products(
 			array(
 				'page' => $page,
-				'type' => array_merge( Product::WC_TYPES, Price::WC_TYPES ),
 			)
 		);
 
@@ -879,7 +879,6 @@ function payment_method_enabled(): void {
 	 */
 	$result = wc_get_products(
 		array(
-			'type'     => array_merge( Product::WC_TYPES, Price::WC_TYPES ),
 			'paginate' => true,
 		)
 	);

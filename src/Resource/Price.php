@@ -9,8 +9,6 @@ declare(strict_types=1);
 
 namespace Flex\Resource;
 
-use Automattic\WooCommerce\Enums\ProductStatus;
-use Automattic\WooCommerce\Enums\ProductType;
 use Flex\Exception\FlexException;
 use Flex\Exception\FlexResponseException;
 
@@ -18,8 +16,6 @@ use Flex\Exception\FlexResponseException;
  * Flex Price
  */
 class Price extends Resource implements ResourceInterface {
-
-	public const WC_TYPES = array( ProductType::SIMPLE, ProductType::VARIATION );
 
 	protected const KEY_ID                  = 'price_id';
 	protected const KEY_HASH                = 'price_hash';
@@ -85,7 +81,10 @@ class Price extends Resource implements ResourceInterface {
 	public static function from_wc( \WC_Product $product ): self {
 		$meta_prefix = self::meta_prefix();
 
-		if ( ProductType::VARIATION === $product->get_type() ) {
+		// A variation is the only product type with a real parent; its catalog
+		// product is that parent. Everything else (simple, bundle, composite) is its
+		// own product. Keyed on structure, not the type string.
+		if ( $product->get_parent_id() > 0 ) {
 			$parent_product = wc_get_product( $product->get_parent_id() );
 			if ( $parent_product instanceof \WC_Product ) {
 				$flex_product = Product::from_wc( $parent_product );
@@ -112,7 +111,10 @@ class Price extends Resource implements ResourceInterface {
 
 		$price = new self(
 			id: $product->meta_exists( $meta_prefix . self::KEY_ID ) && is_string( $price_id_meta ) ? $price_id_meta : null,
-			active: $product->get_status() !== ProductStatus::TRASH,
+			// A unit is active only while it remains purchasable. Trashed, draft, and
+			// private products are not purchasable, so they deactivate in Flex. Including
+			// this in the hash makes needs() report UPDATE when a synced unit unpublishes.
+			active: self::is_purchasable_unit( $product ),
 			description: '' !== $description ? trim( $description ) : null,
 			product: $flex_product,
 			unit_amount: self::currency_to_unit_amount( $product->get_regular_price() ),
@@ -238,9 +240,39 @@ class Price extends Resource implements ResourceInterface {
 	}
 
 	/**
+	 * Whether a WooCommerce product is a single purchasable unit (a "SKU").
+	 *
+	 * A unit is something a customer buys directly: purchasable and not a container.
+	 * True for simple products, variations, bundles, composites, subscriptions;
+	 * false for variable/grouped parents (containers) and external/affiliate products
+	 * (not purchasable). Units map to a Flex price; their catalog product is resolved
+	 * in from_wc (the parent for a variation, otherwise the product itself).
+	 *
+	 * @param \WC_Product $product The WooCommerce product.
+	 */
+	public static function is_purchasable_unit( \WC_Product $product ): bool {
+		return $product->is_purchasable() && ! $product->has_child();
+	}
+
+	/**
 	 * {@inheritdoc}
 	 */
 	public function needs(): ResourceAction {
+		// Only a purchasable unit (a SKU) maps to a Flex price. Containers like a
+		// variable parent, and non-purchasable types (grouped, external), do not.
+		if ( null !== $this->wc && ! self::is_purchasable_unit( $this->wc ) ) {
+			// No longer a purchasable unit (trashed/unpublished variation, container,
+			// etc.). If previously synced, deactivate it (from_wc set active: false).
+			// Hash-gated so exec(UPDATE) -> apply_to() makes the next sync NONE.
+			if ( null === $this->id ) {
+				return ResourceAction::NONE;
+			}
+			$meta_prefix = self::meta_prefix();
+			return $this->wc->get_meta( $meta_prefix . self::KEY_HASH ) !== $this->hash()
+				? ResourceAction::UPDATE
+				: ResourceAction::NONE;
+		}
+
 		// Wait for a product id to be set.
 		if ( null === $this->product->id() ) {
 			// If the product doesn't need any action, it can never be resolved — skip.
@@ -262,11 +294,6 @@ class Price extends Resource implements ResourceInterface {
 
 		// If the price was not created from WooCommerce, there's nothing more to check.
 		if ( null === $this->wc ) {
-			return ResourceAction::NONE;
-		}
-
-		// WooCommerce-specific checks for updates.
-		if ( ! in_array( $this->wc->get_type(), self::WC_TYPES, true ) ) {
 			return ResourceAction::NONE;
 		}
 

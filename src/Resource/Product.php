@@ -9,8 +9,6 @@ declare(strict_types=1);
 
 namespace Flex\Resource;
 
-use Automattic\WooCommerce\Enums\ProductStatus;
-use Automattic\WooCommerce\Enums\ProductType;
 use Flex\Exception\FlexException;
 use Flex\Exception\FlexResponseException;
 
@@ -18,8 +16,6 @@ use Flex\Exception\FlexResponseException;
  * Flex Product
  */
 class Product extends Resource implements ResourceInterface {
-
-	public const WC_TYPES = array( ProductType::SIMPLE, ProductType::VARIABLE );
 
 	protected const KEY_ID                  = 'product_id';
 	protected const KEY_HASH                = 'product_hash';
@@ -157,7 +153,11 @@ class Product extends Resource implements ResourceInterface {
 		$p = new self(
 			name: $product->get_name(),
 			id: $product->meta_exists( $meta_prefix . self::KEY_ID ) && is_string( $product_id_meta ) ? $product_id_meta : null,
-			active: $product->get_status() !== ProductStatus::TRASH,
+			// A product is active only while it remains a catalog product. Trashed,
+			// draft, and private products (and those with no price) are not catalog
+			// products, so they deactivate in Flex. Including this in the hash makes
+			// needs() report UPDATE when a synced product unpublishes or loses its price.
+			active: self::is_catalog_product( $product ),
 			description: '' !== $description ? $description : null,
 			gtin: $gtin,
 			url: false !== $url && '' !== $url ? $url : null,
@@ -170,6 +170,21 @@ class Product extends Resource implements ResourceInterface {
 	}
 
 	/**
+	 * Whether a WooCommerce product is a Flex catalog product.
+	 *
+	 * A catalog product is a top-level sellable product: simple, variable parent,
+	 * bundle, composite, subscription. It excludes variations (whose catalog product
+	 * is their parent — see Price::from_wc) and non-purchasable grouped/external
+	 * products. Catalog products map to a Flex product; their purchasable units map
+	 * to Flex prices (see Price::is_purchasable_unit).
+	 *
+	 * @param \WC_Product $product The WooCommerce product.
+	 */
+	public static function is_catalog_product( \WC_Product $product ): bool {
+		return 0 === $product->get_parent_id() && $product->is_purchasable();
+	}
+
+	/**
 	 * {@inheritdoc}
 	 */
 	public function needs(): ResourceAction {
@@ -178,15 +193,24 @@ class Product extends Resource implements ResourceInterface {
 			return ResourceAction::NONE;
 		}
 
-		if ( ! in_array( $this->wc->get_type(), self::WC_TYPES, true ) ) {
-			return ResourceAction::NONE;
+		$meta_prefix = self::meta_prefix();
+
+		if ( ! self::is_catalog_product( $this->wc ) ) {
+			// No longer a catalog product (trashed, unpublished, or price cleared).
+			// If it was previously synced, push the deactivation from_wc captured
+			// (active: false). The hash gate keeps this idempotent and loop-free:
+			// exec(UPDATE) -> apply_to() rewrites the hash, so the next sync is NONE.
+			if ( null === $this->id ) {
+				return ResourceAction::NONE;
+			}
+			return $this->wc->get_meta( $meta_prefix . self::KEY_HASH ) !== $this->hash()
+				? ResourceAction::UPDATE
+				: ResourceAction::NONE;
 		}
 
 		if ( null === $this->id ) {
 			return ResourceAction::CREATE;
 		}
-
-		$meta_prefix = self::meta_prefix();
 
 		if ( $this->wc->get_meta( $meta_prefix . self::KEY_NAME ) !== $this->name ) {
 			return ResourceAction::CREATE;
