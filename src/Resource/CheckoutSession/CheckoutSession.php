@@ -99,6 +99,15 @@ class CheckoutSession extends Resource {
 	}
 
 	/**
+	 * Returns the line items for the checkout session.
+	 *
+	 * @return LineItem[]
+	 */
+	public function line_items(): array {
+		return $this->line_items;
+	}
+
+	/**
 	 * Returns whether the checkout session is in test mode or not.
 	 */
 	public function test_mode(): ?bool {
@@ -172,8 +181,13 @@ class CheckoutSession extends Resource {
 			),
 		);
 
-		// A map of item_id => LineItem.
-		$product_items = array_filter( $order->get_items(), static fn( $item ) => $item instanceof \WC_Order_Item_Product );
+		// A map of item_id => LineItem. Bundled children whose price is rolled into
+		// their container are skipped: they duplicate the bundle in the Flex checkout
+		// and would show as free. See is_bundled_free_item() for how they're detected.
+		$product_items = array_filter(
+			$order->get_items(),
+			static fn( $item ) => $item instanceof \WC_Order_Item_Product && ! self::is_bundled_free_item( $item ),
+		);
 		$line_items    = array_map( static fn( \WC_Order_Item_Product $item ) => LineItem::from_wc( $item ), $product_items );
 
 		$tax_rate = TaxRate::from_wc( $order );
@@ -220,11 +234,7 @@ class CheckoutSession extends Resource {
 		}
 
 		// Add the sale price discounts.
-		foreach ( $order->get_items() as $item ) {
-			if ( ! $item instanceof \WC_Order_Item_Product ) {
-				continue;
-			}
-
+		foreach ( $product_items as $item ) {
 			$product = $item->get_product();
 			if ( ! $product instanceof \WC_Product || $product->get_price() !== $product->get_sale_price() ) {
 				continue;
@@ -270,6 +280,34 @@ class CheckoutSession extends Resource {
 		$checkout_session->wc = $order;
 
 		return $checkout_session;
+	}
+
+	/**
+	 * Whether an order item is a bundled child whose price is rolled into its
+	 * bundle container, leaving it with a $0 line subtotal.
+	 *
+	 * WooCommerce Product Bundles adds a bundle's children to the order as their own
+	 * line items; children that are not priced individually have their price counted
+	 * in the container, so their subtotal is $0. Those duplicate the container in the
+	 * Flex checkout and would appear as free, so they are skipped. Individually-priced
+	 * children carry a real subtotal and are kept, so the line items still sum to the
+	 * order total — keying on the *subtotal* (pre-discount) guarantees that dropping
+	 * an item never changes any total.
+	 *
+	 * Detection uses Product Bundles' public API behind a function_exists() guard, so
+	 * the branch is inert when the (proprietary) plugin is not active — matching how
+	 * WooCommerce's own first-party integrations gate on a partner plugin. Standalone
+	 * free products are therefore kept; only genuine bundle children are dropped.
+	 *
+	 * @link https://woocommerce.com/document/bundles/bundles-functions-reference/#h-wc-pb-is-bundled-order-item
+	 *       bool wc_pb_is_bundled_order_item( WC_Order_Item $order_item, WC_Order $order = false )
+	 *
+	 * @param \WC_Order_Item_Product $item The WooCommerce Order Item.
+	 */
+	private static function is_bundled_free_item( \WC_Order_Item_Product $item ): bool {
+		return function_exists( 'wc_pb_is_bundled_order_item' )
+			&& wc_pb_is_bundled_order_item( $item )
+			&& 0 === self::currency_to_unit_amount( $item->get_subtotal() );
 	}
 
 	/**

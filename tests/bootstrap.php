@@ -88,6 +88,13 @@ function _manually_load_plugin(): void {
 
 	WC_Install::create_tables();
 
+	// The proprietary WooCommerce Product Bundles plugin is not installed in CI, so
+	// stub its public API for the bundle-detection tests. No-op if the real plugin
+	// is ever present (e.g. a local run with it installed).
+	if ( ! function_exists( 'wc_pb_is_bundled_order_item' ) ) {
+		require_once __DIR__ . '/stubs/woocommerce-product-bundles.php';
+	}
+
 	// Load the plugin entrypoint so its hook registrations (add_action/add_filter)
 	// are active under test. WooCommerce is loaded above and the composer autoloader
 	// was required by this bootstrap, so the plugin's own require_once of it is a
