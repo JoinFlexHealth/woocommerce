@@ -11,8 +11,10 @@ namespace Flex\Tests\Resource\CheckoutSession;
 
 use Flex\Resource\CheckoutSession\CheckoutSession;
 use Flex\Resource\CheckoutSession\Discount;
+use Flex\Resource\CheckoutSession\Fee;
 use Flex\Resource\CheckoutSession\LineItem;
 use Flex\Resource\CheckoutSession\Status;
+use Flex\Resource\Coupon;
 use Flex\Resource\ResourceAction;
 use phpmock\phpunit\PHPMock;
 
@@ -421,5 +423,159 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 		);
 
 		self::assertSame( ResourceAction::NONE, $checkout_session->needs() );
+	}
+
+	/**
+	 * Build a single-line-item order whose recorded grand total is set
+	 * independently of the line item total, so a divergence between
+	 * $order->get_total() and the sum of its parts can be exercised directly —
+	 * the exact shape WooCommerce produces when it rounds the grand total.
+	 *
+	 * @param string $price       The product price and line item total (e.g. "3585.75").
+	 * @param string $order_total The recorded order grand total (e.g. "3586").
+	 */
+	private function order_with_total( string $price, string $order_total ): \WC_Order {
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
+
+		$product = new \WC_Product_Simple();
+		$product->set_name( 'Mattress' );
+		$product->set_regular_price( $price );
+		$product->set_status( 'publish' );
+		$product->save();
+
+		$item_id = $order->add_product( $product, 1 );
+		$item    = $order->get_item( $item_id );
+		assert( $item instanceof \WC_Order_Item_Product );
+		$item->set_subtotal( $price );
+		$item->set_total( $price );
+		$item->save();
+
+		// Set the grand total directly rather than via calculate_totals(), which
+		// would recompute it from the line item and erase the rounding divergence.
+		$order->set_total( $order_total );
+		$order->save();
+
+		$reloaded = wc_get_order( $order->get_id() );
+		assert( $reloaded instanceof \WC_Order );
+		return $reloaded;
+	}
+
+	/**
+	 * The `amount` of every fee in a serialized checkout session payload.
+	 *
+	 * @param array<string, mixed> $data A CheckoutSession::jsonSerialize() payload.
+	 *
+	 * @return int[]
+	 */
+	private static function fee_amounts( array $data ): array {
+		$fees = $data['fees'] ?? array();
+
+		$amounts = array();
+		if ( is_array( $fees ) ) {
+			foreach ( $fees as $fee ) {
+				if ( $fee instanceof Fee ) {
+					$amounts[] = $fee->amount();
+				}
+			}
+		}
+
+		return $amounts;
+	}
+
+	/**
+	 * Inline coupon `amount_off` values across the discounts in a serialized payload.
+	 *
+	 * @param array<string, mixed> $data A CheckoutSession::jsonSerialize() payload.
+	 *
+	 * @return array<int, ?int>
+	 */
+	private static function discount_amounts_off( array $data ): array {
+		$discounts = $data['discounts'] ?? array();
+
+		$amounts = array();
+		if ( is_array( $discounts ) ) {
+			foreach ( $discounts as $discount ) {
+				if ( ! $discount instanceof Discount ) {
+					continue;
+				}
+
+				$coupon = $discount->jsonSerialize()['coupon_data'] ?? null;
+				if ( $coupon instanceof Coupon ) {
+					$amounts[] = $coupon->amount_off();
+				}
+			}
+		}
+
+		return $amounts;
+	}
+
+	/**
+	 * When WooCommerce rounds the grand total *up* (e.g. $3585.75 line item stored
+	 * as a $3586 order total), from_wc() adds a fee for the difference so the
+	 * amount Flex computes reconciles to what WooCommerce recorded. Without it the
+	 * amount_total guard in process_payment() would reject the checkout — the exact
+	 * failure reported in MER-1716.
+	 */
+	public function test_from_wc_adds_rounding_fee_when_order_total_rounded_up(): void {
+		$order = $this->order_with_total( '3585.75', '3586' );
+
+		$data = CheckoutSession::from_wc( $order )->jsonSerialize();
+
+		self::assertContains( 25, self::fee_amounts( $data ) );
+	}
+
+	/**
+	 * When WooCommerce rounds the grand total *down* (e.g. $839.30 in line items
+	 * stored as an $839 order total), from_wc() adds a discount for the difference
+	 * so Flex's computed total matches WooCommerce's.
+	 */
+	public function test_from_wc_adds_rounding_discount_when_order_total_rounded_down(): void {
+		$order = $this->order_with_total( '839.30', '839' );
+
+		$data = CheckoutSession::from_wc( $order )->jsonSerialize();
+
+		self::assertContains( 30, self::discount_amounts_off( $data ) );
+	}
+
+	/**
+	 * When the recorded total already matches the sum of the parts, no adjustment
+	 * is added — the reconciliation only ever fires on a genuine rounding gap.
+	 */
+	public function test_from_wc_adds_no_adjustment_when_totals_reconcile(): void {
+		$order = $this->order_with_total( '40.00', '40.00' );
+
+		$data = CheckoutSession::from_wc( $order )->jsonSerialize();
+
+		self::assertSame( array(), self::fee_amounts( $data ) );
+		self::assertSame( array(), self::discount_amounts_off( $data ) );
+	}
+
+	/**
+	 * A discrepancy of exactly one whole currency unit is the boundary: the tolerance
+	 * is strict (`abs( $delta ) < one_unit`), so one full unit is NOT rounding — it
+	 * signals a plugin altering the amount or a real bug and is deliberately left to
+	 * fail the amount_total guard in process_payment(). Pins the `<` (vs `<=`) comparison.
+	 */
+	public function test_from_wc_does_not_absorb_discrepancy_of_a_whole_unit(): void {
+		$order = $this->order_with_total( '40.00', '41.00' );
+
+		$data = CheckoutSession::from_wc( $order )->jsonSerialize();
+
+		self::assertSame( array(), self::fee_amounts( $data ) );
+		self::assertSame( array(), self::discount_amounts_off( $data ) );
+	}
+
+	/**
+	 * A gap of just under one unit is the largest still treated as rounding: at 99
+	 * cents the strict `abs( $delta ) < one_unit` check holds, so from_wc() reconciles
+	 * it. With the whole-unit case above, this pins both sides of the threshold.
+	 */
+	public function test_from_wc_reconciles_gap_just_under_one_unit(): void {
+		$order = $this->order_with_total( '40.00', '40.99' );
+
+		$data = CheckoutSession::from_wc( $order )->jsonSerialize();
+
+		self::assertContains( 99, self::fee_amounts( $data ) );
 	}
 }

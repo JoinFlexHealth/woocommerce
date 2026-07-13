@@ -255,6 +255,26 @@ class CheckoutSession extends Resource {
 
 		$fees = array_map( static fn( $f ) => Fee::from_wc( $f ), array_values( $order->get_fees() ) );
 
+		// WooCommerce's recorded $order->get_total() can differ by a small rounding amount
+		// from the sum of the line item totals, shipping, tax and fees that Flex recomputes
+		// from — which would otherwise fail the amount_total check in
+		// PaymentGateway::process_payment (MER-1716). Add an adjustment so the charge matches
+		// what WooCommerce recorded; a large gap is a real discrepancy, left to fail the guard.
+		$rounding = self::order_total_rounding_adjustment( $order, $product_items );
+		if ( $rounding > 0 ) {
+			$fees[] = new Fee(
+				amount: $rounding,
+				name: __( 'Rounding adjustment', 'pay-with-flex' ),
+			);
+		} elseif ( $rounding < 0 ) {
+			$discounts[] = new Discount(
+				new Coupon(
+					name: __( 'Rounding adjustment', 'pay-with-flex' ),
+					amount_off: - $rounding,
+				)
+			);
+		}
+
 		$redirect_meta  = $order->get_meta( self::META_PREFIX . self::KEY_REDIRECT_URL );
 		$status_meta    = $order->get_meta( self::META_PREFIX . self::KEY_STATUS );
 		$test_mode_meta = $order->get_meta( self::META_PREFIX . self::KEY_TEST_MODE );
@@ -308,6 +328,40 @@ class CheckoutSession extends Resource {
 		return function_exists( 'wc_pb_is_bundled_order_item' )
 			&& wc_pb_is_bundled_order_item( $item )
 			&& 0 === self::currency_to_unit_amount( $item->get_subtotal() );
+	}
+
+	/**
+	 * The adjustment that reconciles WooCommerce's recorded order total with the sum
+	 * of its own line item totals, shipping, tax and fees.
+	 *
+	 * WooCommerce's get_total() can differ from that unrounded sum by a small rounding
+	 * amount. Returns the delta (recorded total − parts), positive when WooCommerce
+	 * rounded up and negative when it rounded down.
+	 *
+	 * Only rounding is reconciled; a larger gap is a real discrepancy, so it returns 0
+	 * and is left to fail the amount_total guard in {@link PaymentGateway::process_payment}.
+	 *
+	 * @param \WC_Order                $order         The WooCommerce Order.
+	 * @param \WC_Order_Item_Product[] $product_items The product line items sent to Flex.
+	 */
+	private static function order_total_rounding_adjustment( \WC_Order $order, array $product_items ): int {
+		$components = self::currency_to_unit_amount( $order->get_shipping_total() )
+			+ self::currency_to_unit_amount( $order->get_total_tax() );
+
+		foreach ( $product_items as $item ) {
+			$components += self::currency_to_unit_amount( $item->get_total() );
+		}
+
+		foreach ( $order->get_fees() as $fee ) {
+			$components += self::currency_to_unit_amount( $fee->get_amount() );
+		}
+
+		$delta = self::currency_to_unit_amount( $order->get_total() ) - $components;
+
+		// Reconcile based on ranges seen in sentry, MER-1716. Can update if we find valid errors with larger ranges.
+		$one_unit = self::currency_to_unit_amount( '1' );
+
+		return abs( $delta ) < $one_unit ? $delta : 0;
 	}
 
 	/**
