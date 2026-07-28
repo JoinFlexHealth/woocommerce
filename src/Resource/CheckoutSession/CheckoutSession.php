@@ -12,6 +12,7 @@ namespace Flex\Resource\CheckoutSession;
 use Flex\Controller\Controller;
 use Flex\Exception\FlexException;
 use Flex\Exception\FlexResponseException;
+use Flex\PaymentGateway;
 use Flex\Resource\Coupon;
 use Flex\Resource\Resource;
 use Flex\Resource\ResourceAction;
@@ -368,7 +369,11 @@ class CheckoutSession extends Resource {
 	 * Returns the WooCommerce order associated with this Checkout Session, if there is one.
 	 */
 	public function wc(): ?\WC_Order {
-		if ( null === $this->wc && null !== $this->id ) {
+		if ( null !== $this->wc ) {
+			return $this->wc;
+		}
+
+		if ( null !== $this->id ) {
 			$orders = wc_get_orders(
 				array(
 					'transaction_id' => $this->id,
@@ -377,6 +382,29 @@ class CheckoutSession extends Resource {
 
 			if ( is_array( $orders ) && array() !== $orders ) {
 				$this->wc = array_shift( $orders );
+
+				return $this->wc;
+			}
+		}
+
+		// Fall back to the WooCommerce order id, which from_wc() sends as
+		// client_reference_id and extract() reads back off the response.
+		//
+		// needs() returns CREATE for any non-complete session, so editing a pending
+		// order mints a second Checkout Session and apply_to() re-points the order's
+		// transaction_id at the newer id. The first session stays open and payable,
+		// and when it completes nothing matches on transaction_id -- so the webhook
+		// handler used to 422 and leave the order pending forever despite the
+		// customer having paid. See MER-242 / MER-290.
+		if ( null !== $this->client_reference_id && is_numeric( $this->client_reference_id ) ) {
+			$order = wc_get_order( (int) $this->client_reference_id );
+
+			// Only ever resolve an order that was actually paid through Flex. The
+			// signature is verified before the webhook handler runs, so the payload is
+			// authenticated, but this fallback trusts an id from the response body
+			// rather than our own stored meta -- so do not rely on that check alone.
+			if ( $order instanceof \WC_Order && PaymentGateway::ID === $order->get_payment_method() ) {
+				$this->wc = $order;
 			}
 		}
 

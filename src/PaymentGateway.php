@@ -23,6 +23,14 @@ use Sentry\State\Scope;
  */
 class PaymentGateway extends \WC_Payment_Gateway {
 
+	/**
+	 * The WooCommerce payment gateway id.
+	 *
+	 * Exposed as a constant so callers can identify a Flex-paid order without
+	 * instantiating the gateway or repeating the literal.
+	 */
+	public const ID = 'flex';
+
 	protected const ENABLED = 'enabled';
 	protected const API_KEY = 'api_key';
 
@@ -31,7 +39,7 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	 *
 	 * @var string
 	 */
-	public $id = 'flex';
+	public $id = self::ID;
 
 	/**
 	 * {@inheritdoc}
