@@ -882,6 +882,7 @@ function flex_product_sync( int $page, int $retries = 0 ): void {
 add_action(
 	hook_name: 'flex_product_sync',
 	callback: __NAMESPACE__ . '\flex_product_sync',
+	accepted_args: 2,
 );
 
 /**
