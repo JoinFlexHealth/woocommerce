@@ -9,6 +9,8 @@
  * License:          GPL-3.0-or-later
  * Requires PHP:     8.1
  * Requires Plugins: woocommerce
+ * WC requires at least: 9.7
+ * WC tested up to:  10.9
  * Text Domain:      pay-with-flex
  *
  * @package Flex
@@ -20,6 +22,7 @@ namespace Flex;
 
 use Automattic\WooCommerce\Blocks\Payments\PaymentMethodRegistry;
 use Automattic\WooCommerce\Enums\ProductType;
+use Automattic\WooCommerce\Utilities\FeaturesUtil;
 use Flex\Controller\OrderController;
 use Flex\Controller\WebhookController;
 use Flex\Exception\FlexException;
@@ -268,6 +271,35 @@ function payment_gateways_initialized( \WC_Payment_Gateways $gateways ): void {
 add_action(
 	hook_name: 'wc_payment_gateways_initialized',
 	callback: __NAMESPACE__ . '\payment_gateways_initialized'
+);
+
+/**
+ * Declares compatibility with the WooCommerce features that require an opt-in.
+ *
+ * Both declarations are silent when absent, which is why they are easy to miss:
+ *
+ * - `custom_order_tables` (High-Performance Order Storage). Without this the
+ *   plugin is listed as *incompatible* on WooCommerce's Order Data Storage
+ *   screen and merchants are warned away from HPOS, which is the default for new
+ *   stores. Orders are only ever reached through CRUD here -- `wc_get_order()`,
+ *   `$order->get_meta()`, `$order->update_meta_data()` -- never `get_post_meta()`
+ *   or `$wpdb`, so the plugin is genuinely storage-agnostic. The one `get_post()`
+ *   call in {@see post_update()} is gated to the `product` and
+ *   `product_variation` post types, which HPOS leaves in the posts table.
+ * - `cart_checkout_blocks`. {@see PaymentMethod} already registers the gateway
+ *   with the Blocks payment method registry; this states it explicitly.
+ */
+function declare_wc_compatibility(): void {
+	if ( ! class_exists( FeaturesUtil::class ) ) {
+		return;
+	}
+
+	FeaturesUtil::declare_compatibility( 'custom_order_tables', __FILE__ );
+	FeaturesUtil::declare_compatibility( 'cart_checkout_blocks', __FILE__ );
+}
+add_action(
+	hook_name: 'before_woocommerce_init',
+	callback: __NAMESPACE__ . '\declare_wc_compatibility',
 );
 
 /**
