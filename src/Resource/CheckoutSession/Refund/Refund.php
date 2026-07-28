@@ -129,6 +129,15 @@ class Refund extends Resource {
 
 		// Now that we have all of the line items proportionally setup, we need to deal with any rounding errors by
 		// reducing/adding each item by a penny until we get to the correct amount.
+		//
+		// Walk the line items round-robin, one cent per line, wrapping back to the
+		// start when we run off the end. Advancing $i is what spreads the remainder:
+		// without it every cent is applied to line 0, which still sums to the right
+		// total but hands Flex a per-line breakdown that does not match what
+		// WooCommerce refunded -- and those per-line amounts are the HSA/FSA
+		// substantiation record. The remainder is regularly more than a cent because
+		// $refund->get_total() includes shipping and tax while the line items are
+		// ex-tax, so this is the common path, not an edge case.
 		$remainder = $refund_amount - array_reduce( $cs_refund->line_items, fn ( $acc, $li ) => $acc + $li->amount_to_refund(), 0 );
 
 		$i = 0;
@@ -144,6 +153,7 @@ class Refund extends Resource {
 			);
 
 			++$remainder;
+			++$i;
 		}
 
 		$i = 0;
@@ -159,6 +169,7 @@ class Refund extends Resource {
 			);
 
 			--$remainder;
+			++$i;
 		}
 
 		return $cs_refund;
