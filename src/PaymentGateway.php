@@ -11,6 +11,7 @@ namespace Flex;
 
 use Automattic\WooCommerce\Enums\OrderStatus;
 use Flex\Exception\FlexException;
+use Flex\Exception\FlexResponseException;
 use Flex\Resource\CheckoutSession\CheckoutSession;
 use Flex\Resource\CheckoutSession\Refund\Refund;
 use Flex\Resource\ResourceAction;
@@ -215,12 +216,18 @@ class PaymentGateway extends \WC_Payment_Gateway {
 				),
 			);
 
-			sentry()->captureException(
-				new \Exception(
-					message: 'Payment processing failure',
-					previous: $previous,
-				)
-			);
+			// Expected business rejections (e.g. checkout_amount_too_low) are Woo-log-only, not
+			// Sentry — retrying cannot help, so we don't page on them (WOOCOMMERCE-86).
+			$client_error = self::is_client_error( $previous );
+
+			if ( ! $client_error ) {
+				sentry()->captureException(
+					new \Exception(
+						message: 'Payment processing failure',
+						previous: $previous,
+					)
+				);
+			}
 
 			if ( true === \WP_DEBUG ) {
 				// Throw the underlying error message which will be displayed the user.
@@ -233,10 +240,27 @@ class PaymentGateway extends \WC_Payment_Gateway {
 			}
 
 			throw new \Exception(
-				message: "We're sorry, there was a problem while attempting to processes your payment with Flex. Please try again later.",
+				message: "We're sorry, there was a problem while attempting to process your payment with Flex. Please try again later.",
 				previous: $previous, // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 			);
 		}
+	}
+
+	/**
+	 * HTTP statuses treated as client-side rejections: surfaced to the shopper, not sent to Sentry.
+	 *
+	 * @var int[]
+	 */
+	private const CLIENT_ERROR_STATUSES = array( 400, 404 );
+
+	/**
+	 * Whether a caught exception is a client-side rejection (see {@see self::CLIENT_ERROR_STATUSES}).
+	 *
+	 * @param \Throwable $previous The caught exception.
+	 */
+	protected static function is_client_error( \Throwable $previous ): bool {
+		return $previous instanceof FlexResponseException
+			&& in_array( (int) $previous->code(), self::CLIENT_ERROR_STATUSES, true );
 	}
 
 	/**
