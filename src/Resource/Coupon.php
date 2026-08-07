@@ -127,7 +127,14 @@ class Coupon extends Resource {
 		$amount_off = 0;
 		if ( '' !== $product->get_regular_price() && '' !== $product->get_sale_price() ) {
 			if ( $product->get_regular_price() !== $product->get_sale_price() ) {
-				$amount_off = self::currency_to_unit_amount( $product->get_regular_price() ) - self::currency_to_unit_amount( $product->get_sale_price() );
+				// A sale price at or above the regular price is not a discount. Clamp the delta at 0
+				// so a negative amount_off never reaches the API, which rejects it with
+				// 422 coupon_amount_must_be_positive. needs() and CheckoutSession::from_wc both
+				// already treat a 0 amount_off as "nothing to do".
+				$amount_off = max(
+					0,
+					self::currency_to_unit_amount( $product->get_regular_price() ) - self::currency_to_unit_amount( $product->get_sale_price() )
+				);
 			}
 		}
 

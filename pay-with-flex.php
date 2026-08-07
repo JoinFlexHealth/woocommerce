@@ -26,6 +26,7 @@ use Automattic\WooCommerce\Utilities\FeaturesUtil;
 use Flex\Controller\OrderController;
 use Flex\Controller\WebhookController;
 use Flex\Exception\FlexException;
+use Flex\Exception\FlexResponseException;
 use Flex\PaymentGateway;
 use Flex\Resource\CheckoutSession\LineItem;
 use Flex\Resource\Coupon;
@@ -564,21 +565,56 @@ add_action(
 );
 
 /**
+ * 4xx statuses that are transient and worth retrying. Every other 4xx is a permanent
+ * client error (e.g. 422 coupon_amount_must_be_positive) that fails identically on
+ * retry, so it is not re-enqueued (WOOCOMMERCE-84). 408 Request Timeout and 429 Too
+ * Many Requests are the two 4xx that mean "try again later".
+ *
+ * @var int[]
+ */
+const TRANSIENT_HTTP_STATUSES = array( 408, 429 );
+
+/**
+ * Whether a caught failure should be re-enqueued for another attempt.
+ *
+ * A FlexResponseException carries the API HTTP status: network failures and 5xx are
+ * always retried, permanent 4xx never are, and the transient 4xx in
+ * {@see TRANSIENT_HTTP_STATUSES} are the exceptions. Any non-response Throwable
+ * (network error, invariant violation) is treated as transient.
+ *
+ * @param \Throwable $previous The caught exception.
+ */
+function flex_is_retryable( \Throwable $previous ): bool {
+	if ( ! $previous instanceof FlexResponseException ) {
+		return true;
+	}
+	$code = (int) $previous->code();
+	return $code < 400 || $code >= 500 || in_array( $code, TRANSIENT_HTTP_STATUSES, true );
+}
+
+/**
  * Update Coupon in Flex.
  *
  * @param int $product_id The id of the coupon.
  * @param int $retries The number of retries that have been attempted.
  *
- * @throws FlexException If the API key is not set.
- * @throws \Throwable Any caught exceptions.
+ * @throws \Throwable Any caught exceptions from the Flex API.
  */
 function flex_update_coupon( int $product_id, int $retries = 0 ): void {
-	try {
-		$gateway = payment_gateway();
-		if ( null === $gateway->api_key() || '' === $gateway->api_key() ) {
-			throw new FlexException( 'API Key is not set' );
-		}
+	$gateway = payment_gateway();
+	if ( null === $gateway->api_key() || '' === $gateway->api_key() ) {
+		// An unset API key is merchant misconfiguration, not a transient failure: log it for
+		// the site operator and stop. Throwing here would re-enqueue through the retry path,
+		// storm the 10-retry budget, and then alert Sentry on exhaustion — which the logging
+		// policy (woocommerce/CLAUDE.md) reserves for genuine bugs, not misconfiguration.
+		wc_get_logger()->warning(
+			'[Flex] Skipping coupon sync: API key is not set.',
+			array( 'product_id' => $product_id )
+		);
+		return;
+	}
 
+	try {
 		$product = wc_get_product( $product_id );
 		if ( ! $product instanceof \WC_Product ) {
 			return;
@@ -587,7 +623,12 @@ function flex_update_coupon( int $product_id, int $retries = 0 ): void {
 		$coupon = Coupon::from_wc( $product );
 		$coupon->exec( $coupon->needs() );
 	} catch ( \Throwable $previous ) {
-		flex_update_coupon_async( $product_id, $retries + 1 );
+		// Re-enqueue only transient failures. A permanent 4xx (e.g. 422
+		// coupon_amount_must_be_positive) fails identically on every retry and would
+		// exhaust the 10-retry budget for nothing (WOOCOMMERCE-84).
+		if ( flex_is_retryable( $previous ) ) {
+			flex_update_coupon_async( $product_id, $retries + 1 );
+		}
 		throw $previous;
 	}
 }
