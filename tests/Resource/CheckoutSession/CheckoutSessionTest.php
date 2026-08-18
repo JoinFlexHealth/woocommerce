@@ -578,4 +578,138 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 
 		self::assertContains( 99, self::fee_amounts( $data ) );
 	}
+
+	/**
+	 * Sum of `unit_amount × quantity` across a session's line items — the pre-discount
+	 * subtotal the Flex backend recomputes from what {@link CheckoutSession::from_wc}
+	 * sends. This is one side of the reconciliation the amount_total guard performs in
+	 * PaymentGateway::process_payment().
+	 *
+	 * @param LineItem[] $line_items The session's line items.
+	 */
+	private static function line_items_total( array $line_items ): int {
+		return array_sum(
+			array_map(
+				static fn( LineItem $li ) => ( $li->price()->jsonSerialize()['unit_amount'] ?? 0 ) * $li->quantity(),
+				$line_items,
+			)
+		);
+	}
+
+	/**
+	 * Regression for MER-2484: a store-credit coupon (WooCommerce Smart Coupons), whose
+	 * amount only the Smart Coupons runtime knows, reconstructs to $0 when from_wc()
+	 * rebuilds it via `new WC_Coupon( $code )` — dropping the credit and leaving the Flex
+	 * line items above the order total, which trips the amount_total guard in
+	 * PaymentGateway::process_payment. Asserts the invariant that must hold to pay: the
+	 * total Flex recomputes from what from_wc() sends equals the recorded order total.
+	 *
+	 * We model the un-reconstructable coupon by applying a real fixed_cart coupon to
+	 * set the order total, then zeroing its static amount so from_wc()'s reconstruction
+	 * reproduces $0 — the same observable shape as a store-credit coupon. The coupon
+	 * still *exists* (so `new WC_Coupon( $code )` resolves rather than throwing "Invalid
+	 * coupon"); it simply no longer carries the discount in its static definition.
+	 */
+	public function test_from_wc_reconciles_store_credit_to_order_total(): void {
+		// Mirrors Ride1Up order 679153: a Vorsa listed at $1,595, on sale to $1,495, with a
+		// $225 Colorado e-bike rebate applied as a store credit. The sale is a reconstructable
+		// discount; the rebate is not — only its combination reproduces the failure faithfully.
+		$product = new \WC_Product_Simple();
+		$product->set_name( 'Vorsa' );
+		$product->set_regular_price( '1595.00' );
+		$product->set_sale_price( '1495.00' );
+		$product->set_status( 'publish' );
+		$product->save();
+
+		$rebate = new \WC_Coupon();
+		$rebate->set_code( 'co-ebike-rebate' );
+		$rebate->set_discount_type( 'fixed_cart' );
+		$rebate->set_amount( 225 );
+		$rebate->save();
+
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
+		$order->add_product( $product, 1 );
+		$order->apply_coupon( 'co-ebike-rebate' );
+		$order->calculate_totals();
+		$order->save();
+
+		// Recorded order total: $1,495 sale price less the $225 rebate.
+		self::assertSame( 127000, CheckoutSession::currency_to_unit_amount( $order->get_total() ) );
+
+		// Make the rebate unreconstructable — the shape of a Smart Coupons store credit,
+		// whose amount only its runtime knows. The coupon still exists (so `new WC_Coupon(
+		// $code )` resolves rather than throwing "Invalid coupon"), but its static amount is
+		// gone, so WC_Discounts rebuilds it as $0. The recorded order total is left untouched.
+		$rebate->set_amount( 0 );
+		$rebate->save();
+
+		$reloaded = wc_get_order( $order->get_id() );
+		assert( $reloaded instanceof \WC_Order );
+		$session = CheckoutSession::from_wc( $reloaded );
+		$data    = $session->jsonSerialize();
+
+		// Two discounts reach Flex, and the sale is never double-counted: the $100 sale
+		// reduction (regular $1,595 → sale $1,495) rebuilt on the sale-price path, and the
+		// $225 rebate recovered by the get_discount_total() reconciliation.
+		self::assertContains( 10000, self::discount_amounts_off( $data ) );
+		self::assertContains( 22500, self::discount_amounts_off( $data ) );
+		self::assertSame( 32500, array_sum( self::discount_amounts_off( $data ) ) );
+
+		// Line items ($1,595) less those discounts ($325) equal the recorded order total
+		// ($1,270), so the amount_total guard in PaymentGateway::process_payment passes.
+		$reconstructed = self::line_items_total( $session->line_items() )
+			- array_sum( self::discount_amounts_off( $data ) )
+			+ array_sum( self::fee_amounts( $data ) );
+
+		self::assertSame(
+			CheckoutSession::currency_to_unit_amount( $reloaded->get_total() ),
+			$reconstructed,
+		);
+	}
+
+	/**
+	 * The correct configuration (and the fix we recommend to the merchant): when the
+	 * same $225 rebate is applied as a standard fixed_cart discount coupon instead of
+	 * store credit, from_wc() reconstructs it cleanly. The reconstructed discount
+	 * brings the checkout total back to the recorded order total, so the amount_total
+	 * guard passes and the payment proceeds. Contrast with
+	 * test_from_wc_reconciles_store_credit_to_order_total().
+	 */
+	public function test_from_wc_reconstructs_standard_fixed_cart_coupon(): void {
+		$product = new \WC_Product_Simple();
+		$product->set_name( 'Vorsa' );
+		$product->set_regular_price( '1595.00' );
+		$product->set_status( 'publish' );
+		$product->save();
+
+		$coupon = new \WC_Coupon();
+		$coupon->set_code( 'co-ebike-rebate-fixed' );
+		$coupon->set_discount_type( 'fixed_cart' );
+		$coupon->set_amount( 225 );
+		$coupon->save();
+
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
+		$order->add_product( $product, 1 );
+		$order->apply_coupon( 'co-ebike-rebate-fixed' );
+		$order->calculate_totals();
+		$order->save();
+
+		$reloaded = wc_get_order( $order->get_id() );
+		assert( $reloaded instanceof \WC_Order );
+		$session = CheckoutSession::from_wc( $reloaded );
+		$data    = $session->jsonSerialize();
+
+		// The $225 discount is reconstructed as an inline coupon.
+		self::assertSame( array( 22500 ), self::discount_amounts_off( $data ) );
+
+		// Line items ($1,595) minus the reconstructed discount ($225) equal the
+		// recorded order total ($1,370): the guard passes.
+		$reconstructed = self::line_items_total( $session->line_items() ) - array_sum( self::discount_amounts_off( $data ) );
+		self::assertSame(
+			CheckoutSession::currency_to_unit_amount( $reloaded->get_total() ),
+			$reconstructed,
+		);
+	}
 }

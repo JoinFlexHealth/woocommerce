@@ -216,7 +216,8 @@ class CheckoutSession extends Resource {
 			}
 		}
 
-		$discounts = array();
+		$discounts               = array();
+		$rebuilt_coupon_discount = 0;
 		foreach ( $discounts_grouped as $code => $group ) {
 			foreach ( $group as $per_item_amount => $item_ids ) {
 				$amount_off = $per_item_amount * count( $item_ids );
@@ -224,7 +225,8 @@ class CheckoutSession extends Resource {
 					continue;
 				}
 
-				$discounts[] = new Discount(
+				$rebuilt_coupon_discount += $amount_off;
+				$discounts[]              = new Discount(
 					new Coupon(
 						name: $code,
 						amount_off: $amount_off,
@@ -232,6 +234,23 @@ class CheckoutSession extends Resource {
 					)
 				);
 			}
+		}
+
+		// A coupon whose discount WooCommerce recorded on the order but that from_wc()
+		// could not rebuild — most often a Smart Coupons store credit, whose amount only
+		// the Smart Coupons runtime knows, so `new WC_Coupon( $code )` reconstructs it to
+		// $0 — leaves the Flex line items above the order total and fails the amount_total
+		// guard in PaymentGateway::process_payment (MER-2484). Reconcile the coupon discount
+		// WooCommerce recorded against what we rebuilt and add a discount for any shortfall,
+		// so the amount Flex charges equals what WooCommerce recorded.
+		$unreconstructed_discount = self::currency_to_unit_amount( $order->get_discount_total() ) - $rebuilt_coupon_discount;
+		if ( $unreconstructed_discount > 0 ) {
+			$discounts[] = new Discount(
+				new Coupon(
+					name: __( 'Discount adjustment', 'pay-with-flex' ),
+					amount_off: $unreconstructed_discount,
+				)
+			);
 		}
 
 		// Add the sale price discounts.
