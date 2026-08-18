@@ -3,7 +3,7 @@ Contributors: withflex, davidbarratt
 Tags: hsa, fsa, payments, woocommerce
 Requires at least: 6.7
 Tested up to: 7.0
-Stable tag: 3.3.8
+Stable tag: 3.3.9
 Requires PHP: 8.1
 License: GPLv3 or later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -54,6 +54,9 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 4. Flex promotes your brand to engaged buyers looking to spend the $150B in HSA/FSA accounts.
 
 == Changelog ==
+
+= 3.3.9 =
+* Fixed checkout being rejected when a coupon discount recorded by WooCommerce could not be reconstructed at checkout — most often a store credit — leaving the charged total above the order total; the recorded discount is now reconciled so the amount matches.
 
 = 3.3.8 =
 * Declared compatibility with WooCommerce High-Performance Order Storage (HPOS) and Checkout Blocks, and added the supported WooCommerce version range (requires WooCommerce 9.7 or later).
