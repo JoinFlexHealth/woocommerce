@@ -193,47 +193,25 @@ class CheckoutSession extends Resource {
 
 		$tax_rate = TaxRate::from_wc( $order );
 
-		// Recreate the discounts so we can get a line-item level discount.
-		$wc_discounts = new \WC_Discounts( $order );
-		foreach ( $order->get_coupons() as $applied ) {
-			// We do *not* verify the coupons because they have already been verified when they were placed on the order.
-			// Applying the coupons again _should_ be deterministic.
-			$wc_discounts->apply_coupon( new \WC_Coupon( $applied->get_code() ), false );
-		}
-
-		// Group the discounts by the code → amount → line item
-		// If the discount is spread evenly across line items, we can share the discount in Flex.
-		$discounts_grouped = array();
-		/**
-		 * Discount amounts grouped by coupon code and line item.
-		 *
-		 * @var array<string, array<string|int, float|string>> $wc_discount_items
-		 */
-		$wc_discount_items = $wc_discounts->get_discounts();
-		foreach ( $wc_discount_items as $code => $items ) {
-			foreach ( $items as $item_id => $amount ) {
-				$discounts_grouped[ $code ][ self::currency_to_unit_amount( $amount ) ][] = $item_id;
-			}
-		}
-
+		// Each line's discount is what WooCommerce recorded ($subtotal − $total). Re-applying
+		// coupons instead over-discounts when they overlap on a shared line (MER-3267).
 		$discounts               = array();
 		$rebuilt_coupon_discount = 0;
-		foreach ( $discounts_grouped as $code => $group ) {
-			foreach ( $group as $per_item_amount => $item_ids ) {
-				$amount_off = $per_item_amount * count( $item_ids );
-				if ( 0 === $amount_off ) {
-					continue;
-				}
-
-				$rebuilt_coupon_discount += $amount_off;
-				$discounts[]              = new Discount(
-					new Coupon(
-						name: $code,
-						amount_off: $amount_off,
-						applies_to: array_map( static fn( string|int $item_id ) => $line_items[ $item_id ]->price(), $item_ids ),
-					)
-				);
+		foreach ( $product_items as $item_id => $item ) {
+			$amount_off = self::currency_to_unit_amount( $item->get_subtotal() )
+				- self::currency_to_unit_amount( $item->get_total() );
+			if ( $amount_off <= 0 ) {
+				continue;
 			}
+
+			$rebuilt_coupon_discount += $amount_off;
+			$discounts[]              = new Discount(
+				new Coupon(
+					name: __( 'Discount', 'pay-with-flex' ),
+					amount_off: $amount_off,
+					applies_to: array( $line_items[ $item_id ]->price() ),
+				)
+			);
 		}
 
 		// A coupon whose discount WooCommerce recorded on the order but that from_wc()

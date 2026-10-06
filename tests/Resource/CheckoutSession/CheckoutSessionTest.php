@@ -511,6 +511,33 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 	}
 
 	/**
+	 * The coupon `name` of each inline discount in a serialized payload.
+	 *
+	 * @param array<string, mixed> $data A CheckoutSession::jsonSerialize() payload.
+	 *
+	 * @return array<int, string>
+	 */
+	private static function discount_names( array $data ): array {
+		$discounts = $data['discounts'] ?? array();
+
+		$names = array();
+		if ( is_array( $discounts ) ) {
+			foreach ( $discounts as $discount ) {
+				if ( ! $discount instanceof Discount ) {
+					continue;
+				}
+
+				$coupon = $discount->jsonSerialize()['coupon_data'] ?? null;
+				if ( $coupon instanceof Coupon ) {
+					$names[] = $coupon->jsonSerialize()['name'];
+				}
+			}
+		}
+
+		return $names;
+	}
+
+	/**
 	 * When WooCommerce rounds the grand total *up* (e.g. $3585.75 line item stored
 	 * as a $3586 order total), from_wc() adds a fee for the difference so the
 	 * amount Flex computes reconciles to what WooCommerce recorded. Without it the
@@ -597,23 +624,18 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 	}
 
 	/**
-	 * Regression for MER-2484: a store-credit coupon (WooCommerce Smart Coupons), whose
-	 * amount only the Smart Coupons runtime knows, reconstructs to $0 when from_wc()
-	 * rebuilds it via `new WC_Coupon( $code )` — dropping the credit and leaving the Flex
-	 * line items above the order total, which trips the amount_total guard in
-	 * PaymentGateway::process_payment. Asserts the invariant that must hold to pay: the
-	 * total Flex recomputes from what from_wc() sends equals the recorded order total.
-	 *
-	 * We model the un-reconstructable coupon by applying a real fixed_cart coupon to
-	 * set the order total, then zeroing its static amount so from_wc()'s reconstruction
-	 * reproduces $0 — the same observable shape as a store-credit coupon. The coupon
-	 * still *exists* (so `new WC_Coupon( $code )` resolves rather than throwing "Invalid
-	 * coupon"); it simply no longer carries the discount in its static definition.
+	 * A line that is both on sale and carries a coupon reconstructs without double-counting
+	 * the sale. WooCommerce records the sale in the line subtotal and the coupon in the line
+	 * total, so the sale-price path emits the $100 reduction once and the per-line
+	 * ($subtotal − $total) pass emits the $225 coupon once — their sum brings the Flex total
+	 * to the recorded order total and the amount_total guard in PaymentGateway::process_payment
+	 * passes. Pins the "subtotal − total is coupon-only" invariant the per-line rewrite relies
+	 * on (MER-3267). The order-level store-credit reconciliation is covered separately by
+	 * test_from_wc_reconciles_order_level_discount_not_on_line_totals().
 	 */
-	public function test_from_wc_reconciles_store_credit_to_order_total(): void {
+	public function test_from_wc_reconstructs_sale_and_coupon_on_same_line(): void {
 		// Mirrors Ride1Up order 679153: a Vorsa listed at $1,595, on sale to $1,495, with a
-		// $225 Colorado e-bike rebate applied as a store credit. The sale is a reconstructable
-		// discount; the rebate is not — only its combination reproduces the failure faithfully.
+		// $225 Colorado e-bike rebate coupon.
 		$product = new \WC_Product_Simple();
 		$product->set_name( 'Vorsa' );
 		$product->set_regular_price( '1595.00' );
@@ -637,24 +659,19 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 		// Recorded order total: $1,495 sale price less the $225 rebate.
 		self::assertSame( 127000, CheckoutSession::currency_to_unit_amount( $order->get_total() ) );
 
-		// Make the rebate unreconstructable — the shape of a Smart Coupons store credit,
-		// whose amount only its runtime knows. The coupon still exists (so `new WC_Coupon(
-		// $code )` resolves rather than throwing "Invalid coupon"), but its static amount is
-		// gone, so WC_Discounts rebuilds it as $0. The recorded order total is left untouched.
-		$rebate->set_amount( 0 );
-		$rebate->save();
-
 		$reloaded = wc_get_order( $order->get_id() );
 		assert( $reloaded instanceof \WC_Order );
 		$session = CheckoutSession::from_wc( $reloaded );
 		$data    = $session->jsonSerialize();
 
-		// Two discounts reach Flex, and the sale is never double-counted: the $100 sale
-		// reduction (regular $1,595 → sale $1,495) rebuilt on the sale-price path, and the
-		// $225 rebate recovered by the get_discount_total() reconciliation.
+		// Two discounts reach Flex with no double-count: the $100 sale reduction (regular
+		// $1,595 → sale $1,495) on the sale-price path, and the $225 coupon on the per-line
+		// pass (WooCommerce recorded it on the line total). The get_discount_total()
+		// reconciliation stays a no-op — no "Discount adjustment" is appended.
 		self::assertContains( 10000, self::discount_amounts_off( $data ) );
 		self::assertContains( 22500, self::discount_amounts_off( $data ) );
 		self::assertSame( 32500, array_sum( self::discount_amounts_off( $data ) ) );
+		self::assertNotContains( 'Discount adjustment', self::discount_names( $data ) );
 
 		// Line items ($1,595) less those discounts ($325) equal the recorded order total
 		// ($1,270), so the amount_total guard in PaymentGateway::process_payment passes.
@@ -669,12 +686,9 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 	}
 
 	/**
-	 * The correct configuration (and the fix we recommend to the merchant): when the
-	 * same $225 rebate is applied as a standard fixed_cart discount coupon instead of
-	 * store credit, from_wc() reconstructs it cleanly. The reconstructed discount
-	 * brings the checkout total back to the recorded order total, so the amount_total
-	 * guard passes and the payment proceeds. Contrast with
-	 * test_from_wc_reconciles_store_credit_to_order_total().
+	 * A standalone fixed_cart coupon (no sale) reconstructs cleanly from the recorded
+	 * per-line $subtotal − $total, bringing the checkout total back to the recorded order
+	 * total so the amount_total guard passes.
 	 */
 	public function test_from_wc_reconstructs_standard_fixed_cart_coupon(): void {
 		$product = new \WC_Product_Simple();
@@ -711,5 +725,241 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 			CheckoutSession::currency_to_unit_amount( $reloaded->get_total() ),
 			$reconstructed,
 		);
+	}
+
+	/**
+	 * MER-2484 / WOOCOMMERCE-4B: two coupons on the same lines, re-applied from scratch,
+	 * stack onto every shared line and over-discount (Thrival 143119: $147.50 vs $95
+	 * recorded), dropping the Flex total below the order total and tripping the
+	 * amount_total guard. Modelled by bumping both coupons to 100% after the order is
+	 * recorded, so re-application would compute more discount than the order carries.
+	 */
+	public function test_from_wc_does_not_over_discount_overlapping_coupons(): void {
+		$a = new \WC_Product_Simple();
+		$a->set_name( 'Attachment A' );
+		$a->set_regular_price( '30.00' );
+		$a->set_status( 'publish' );
+		$a->save();
+
+		$b = new \WC_Product_Simple();
+		$b->set_name( 'Attachment B' );
+		$b->set_regular_price( '30.00' );
+		$b->set_status( 'publish' );
+		$b->save();
+
+		$heads = new \WC_Coupon();
+		$heads->set_code( 'heads' );
+		$heads->set_discount_type( 'percent' );
+		$heads->set_amount( 25 );
+		$heads->set_product_ids( array( $a->get_id(), $b->get_id() ) );
+		$heads->save();
+
+		$arch = new \WC_Coupon();
+		$arch->set_code( 'arch' );
+		$arch->set_discount_type( 'percent' );
+		$arch->set_amount( 25 );
+		$arch->set_product_ids( array( $a->get_id(), $b->get_id() ) );
+		$arch->save();
+
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
+		$order->add_product( $a, 1 );
+		$order->add_product( $b, 1 );
+		$order->apply_coupon( 'heads' );
+		$order->apply_coupon( 'arch' );
+		$order->calculate_totals();
+		$order->save();
+
+		$recorded_total    = CheckoutSession::currency_to_unit_amount( $order->get_total() );
+		$recorded_discount = CheckoutSession::currency_to_unit_amount( $order->get_discount_total() );
+
+		// Bump both coupons after the order was recorded so re-applying them would
+		// over-discount (each now zeroes a $30 line). The recorded order is untouched.
+		$heads->set_amount( 100 );
+		$heads->save();
+		$arch->set_amount( 100 );
+		$arch->save();
+
+		$reloaded = wc_get_order( $order->get_id() );
+		assert( $reloaded instanceof \WC_Order );
+		$session = CheckoutSession::from_wc( $reloaded );
+		$data    = $session->jsonSerialize();
+
+		// Discounts sum to what WooCommerce recorded — never the over-applied amount.
+		self::assertSame( $recorded_discount, array_sum( self::discount_amounts_off( $data ) ) );
+
+		// Line items less discounts (plus any rounding fee) reconcile to the recorded
+		// order total, so the amount_total guard in process_payment passes.
+		$reconstructed = self::line_items_total( $session->line_items() )
+			- array_sum( self::discount_amounts_off( $data ) )
+			+ array_sum( self::fee_amounts( $data ) );
+		self::assertSame( $recorded_total, $reconstructed );
+	}
+
+	/** A percentage coupon reconstructs from the recorded $subtotal − $total, not the coupon's percentage. */
+	public function test_from_wc_reconstructs_percentage_coupon(): void {
+		$product = new \WC_Product_Simple();
+		$product->set_name( 'Widget' );
+		$product->set_regular_price( '40.00' );
+		$product->set_status( 'publish' );
+		$product->save();
+
+		$coupon = new \WC_Coupon();
+		$coupon->set_code( 'quarter-off' );
+		$coupon->set_discount_type( 'percent' );
+		$coupon->set_amount( 25 );
+		$coupon->save();
+
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
+		$order->add_product( $product, 1 );
+		$order->apply_coupon( 'quarter-off' );
+		$order->calculate_totals();
+		$order->save();
+
+		$reloaded = wc_get_order( $order->get_id() );
+		assert( $reloaded instanceof \WC_Order );
+		$session = CheckoutSession::from_wc( $reloaded );
+		$data    = $session->jsonSerialize();
+
+		// 25% of $40 = $10.
+		self::assertSame( array( 1000 ), self::discount_amounts_off( $data ) );
+
+		$reconstructed = self::line_items_total( $session->line_items() ) - array_sum( self::discount_amounts_off( $data ) );
+		self::assertSame( CheckoutSession::currency_to_unit_amount( $reloaded->get_total() ), $reconstructed );
+	}
+
+	/**
+	 * A coupon on a qty > 1 line: the recorded line total already covers every unit, so the
+	 * whole-line discount is emitted once, not multiplied by quantity (ENG-2475).
+	 */
+	public function test_from_wc_reconstructs_coupon_on_multi_quantity_line(): void {
+		$product = new \WC_Product_Simple();
+		$product->set_name( 'Widget' );
+		$product->set_regular_price( '20.00' );
+		$product->set_status( 'publish' );
+		$product->save();
+
+		$coupon = new \WC_Coupon();
+		$coupon->set_code( 'quarter-off-qty' );
+		$coupon->set_discount_type( 'percent' );
+		$coupon->set_amount( 25 );
+		$coupon->save();
+
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
+		$order->add_product( $product, 3 );
+		$order->apply_coupon( 'quarter-off-qty' );
+		$order->calculate_totals();
+		$order->save();
+
+		$reloaded = wc_get_order( $order->get_id() );
+		assert( $reloaded instanceof \WC_Order );
+		$session = CheckoutSession::from_wc( $reloaded );
+		$data    = $session->jsonSerialize();
+
+		// 25% of ($20 × 3 = $60) = $15, emitted once for the whole line.
+		self::assertSame( array( 1500 ), self::discount_amounts_off( $data ) );
+
+		$reconstructed = self::line_items_total( $session->line_items() ) - array_sum( self::discount_amounts_off( $data ) );
+		self::assertSame( CheckoutSession::currency_to_unit_amount( $reloaded->get_total() ), $reconstructed );
+	}
+
+	/**
+	 * MER-2484: an order-level discount (store credit) that reduces no line total is
+	 * invisible to the per-line pass and recovered only by the get_discount_total()
+	 * reconciliation — without it the Flex items stay above the order total.
+	 */
+	public function test_from_wc_reconciles_order_level_discount_not_on_line_totals(): void {
+		$product = new \WC_Product_Simple();
+		$product->set_name( 'Vorsa' );
+		$product->set_regular_price( '1000.00' );
+		$product->set_status( 'publish' );
+		$product->save();
+
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
+		$order->add_product( $product, 1 );
+		$order->calculate_totals();
+
+		// Model a cart-level credit: recorded in the order's discount total, but the line
+		// total is left at full price — the shape a Smart Coupons store credit takes when
+		// applied to the cart rather than per line.
+		$order->set_discount_total( '225' );
+		$order->set_total( '775' );
+		$order->save();
+
+		$reloaded = wc_get_order( $order->get_id() );
+		assert( $reloaded instanceof \WC_Order );
+		$session = CheckoutSession::from_wc( $reloaded );
+		$data    = $session->jsonSerialize();
+
+		// The per-line pass finds nothing (line total == subtotal); the $225 is recovered
+		// solely by the get_discount_total() reconciliation.
+		self::assertSame( array( 22500 ), self::discount_amounts_off( $data ) );
+
+		$reconstructed = self::line_items_total( $session->line_items() ) - array_sum( self::discount_amounts_off( $data ) );
+		self::assertSame( CheckoutSession::currency_to_unit_amount( $reloaded->get_total() ), $reconstructed );
+	}
+
+	/**
+	 * The per-line pass and get_discount_total() are separate WooCommerce computations;
+	 * the reconciliation assumes they agree to the cent. Stacked percentage coupons on
+	 * rounding-prone prices are the likeliest disagreement — pin that they still match,
+	 * with no spurious "Discount adjustment".
+	 */
+	public function test_from_wc_reconciles_rounding_prone_stacked_coupons(): void {
+		$a = new \WC_Product_Simple();
+		$a->set_name( 'Odd A' );
+		$a->set_regular_price( '9.99' );
+		$a->set_status( 'publish' );
+		$a->save();
+
+		$b = new \WC_Product_Simple();
+		$b->set_name( 'Odd B' );
+		$b->set_regular_price( '3.33' );
+		$b->set_status( 'publish' );
+		$b->save();
+
+		$c1 = new \WC_Coupon();
+		$c1->set_code( 'third-off' );
+		$c1->set_discount_type( 'percent' );
+		$c1->set_amount( 33 );
+		$c1->save();
+
+		$c2 = new \WC_Coupon();
+		$c2->set_code( 'seventh-off' );
+		$c2->set_discount_type( 'percent' );
+		$c2->set_amount( 15 );
+		$c2->save();
+
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
+		$order->add_product( $a, 1 );
+		$order->add_product( $b, 2 );
+		$order->apply_coupon( 'third-off' );
+		$order->apply_coupon( 'seventh-off' );
+		$order->calculate_totals();
+		$order->save();
+
+		$reloaded = wc_get_order( $order->get_id() );
+		assert( $reloaded instanceof \WC_Order );
+		$session = CheckoutSession::from_wc( $reloaded );
+		$data    = $session->jsonSerialize();
+
+		// No spurious reconciliation: the per-line discounts already equal what WooCommerce
+		// recorded, so no "Discount adjustment" is appended.
+		self::assertNotContains( 'Discount adjustment', self::discount_names( $data ) );
+		self::assertSame(
+			CheckoutSession::currency_to_unit_amount( $reloaded->get_discount_total() ),
+			array_sum( self::discount_amounts_off( $data ) ),
+		);
+
+		// And the whole thing still reconciles to the recorded order total, so the guard
+		// in process_payment passes despite the per-line rounding.
+		$reconstructed = self::line_items_total( $session->line_items() )
+			- array_sum( self::discount_amounts_off( $data ) )
+			+ array_sum( self::fee_amounts( $data ) );
+		self::assertSame( CheckoutSession::currency_to_unit_amount( $reloaded->get_total() ), $reconstructed );
 	}
 }
