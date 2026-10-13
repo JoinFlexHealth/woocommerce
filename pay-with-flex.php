@@ -304,13 +304,30 @@ add_action(
 );
 
 /**
+ * Report a plugin lifecycle transition to the site log and to Sentry.
+ *
+ * The "WooCommerce Enabled" / "WooCommerce Disabled" Sentry alert rules match these messages verbatim to post
+ * onboarding/offboarding notices, so do not reword them. Bug triage excludes them with `!flex.event_kind:lifecycle`.
+ *
+ * @param string   $message The lifecycle message.
+ * @param Severity $level   The level; warning for transitions that take Flex out of checkout.
+ */
+function capture_lifecycle_event( string $message, Severity $level ): void {
+	wc_get_logger()->log( (string) $level, "[Flex] {$message}." );
+
+	sentry()->withScope(
+		function ( Scope $scope ) use ( $message, $level ): void {
+			$scope->setTag( 'flex.event_kind', 'lifecycle' );
+			sentry()->captureMessage( message: $message, level: $level );
+		}
+	);
+}
+
+/**
  * Activate the plugin.
  */
 function activate(): void {
-	sentry()->captureMessage(
-		message: 'Plugin activated',
-		level: Severity::info(),
-	);
+	capture_lifecycle_event( 'Plugin activated', Severity::info() );
 
 	// Update the webhooks and sync the products if an API key is available.
 	payment_method_enabled();
@@ -324,10 +341,7 @@ register_activation_hook(
  * Deactivate the plugin.
  */
 function deactivate(): void {
-	sentry()->captureMessage(
-		message: 'Plugin deactivated',
-		level: Severity::warning(),
-	);
+	capture_lifecycle_event( 'Plugin deactivated', Severity::warning() );
 
 	$gateway = payment_gateway();
 
@@ -966,10 +980,7 @@ function payment_method_enabled(): void {
  * React to the payment method being disabled.
  */
 function payment_method_disabled(): void {
-	sentry()->captureMessage(
-		message: 'Payment method disabled',
-		level: Severity::warning(),
-	);
+	capture_lifecycle_event( 'Payment method disabled', Severity::warning() );
 	$gateway = payment_gateway();
 
 	// Refresh the settings from the database so we are working with the latest version.
@@ -998,10 +1009,7 @@ function update_option_wc_flex_settings( mixed $old_value, mixed $value ): void 
 	}
 
 	if ( 'yes' === $value['enabled'] && ( ! is_array( $old_value ) || ! isset( $old_value['enabled'] ) || 'no' === $old_value['enabled'] ) ) {
-		sentry()->captureMessage(
-			message: 'Payment method enabled',
-			level: Severity::info(),
-		);
+		capture_lifecycle_event( 'Payment method enabled', Severity::info() );
 		payment_method_enabled();
 	} elseif ( 'no' === $value['enabled'] && is_array( $old_value ) && 'yes' === $old_value['enabled'] ) {
 		payment_method_disabled();
@@ -1029,10 +1037,7 @@ function add_option_wc_flex_settings( string $option, mixed $value ): void {
 	}
 
 	if ( 'yes' === $value['enabled'] ) {
-		sentry()->captureMessage(
-			message: 'Payment method enabled',
-			level: Severity::info(),
-		);
+		capture_lifecycle_event( 'Payment method enabled', Severity::info() );
 		payment_method_enabled();
 	}
 }
