@@ -3,7 +3,7 @@ Contributors: withflex, davidbarratt
 Tags: hsa, fsa, payments, woocommerce
 Requires at least: 6.7
 Tested up to: 7.0
-Stable tag: 3.3.10
+Stable tag: 3.3.11
 Requires PHP: 8.1
 License: GPLv3 or later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -26,7 +26,7 @@ Flex integrates with WooCommerce to enable merchants to accept Health Savings Ac
 - Access to a $150 billion and growing HSA/FSA market
 
 ## How to Get Started:
-Visit [withflex.com](https://www.withflex.com) to learn more or contact us at <hello@withflex.com> to get started.
+Visit [withflex.com/business](https://www.withflex.com/business) to learn more.
 
 == Frequently Asked Questions ==
 
@@ -54,6 +54,9 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 4. Flex promotes your brand to engaged buyers looking to spend the $150B in HSA/FSA accounts.
 
 == Changelog ==
+
+= 3.3.11 =
+* Updated the "How to Get Started" section.
 
 = 3.3.10 =
 * Fixed checkout being rejected when more than one coupon applied to the same product: the overlapping discounts were over-counted, pushing the charged total below the order total and blocking checkout. Discounts are now taken from the amounts WooCommerce already recorded, so the totals reconcile.
