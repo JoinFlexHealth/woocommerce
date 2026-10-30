@@ -139,9 +139,8 @@ class Price extends Resource implements ResourceInterface {
 	/**
 	 * Create a price from a WooCommerce Order Line Item.
 	 *
-	 * If the line item price matches the product's catalog price, delegates to from_wc().
-	 * If the line item price differs (due to add-ons, dynamic pricing, etc.), creates
-	 * an ad-hoc price based on the actual line item price.
+	 * Uses from_wc() when the line charges the catalog price (regular, less any sale discount);
+	 * otherwise (add-ons, dynamic pricing) an ad-hoc price at the line item's actual price.
 	 *
 	 * @param \WC_Order_Item_Product $item The WooCommerce Order Item.
 	 * @param ?string                $id   Optional price ID from stored metadata.
@@ -149,16 +148,20 @@ class Price extends Resource implements ResourceInterface {
 	public static function from_wc_item( \WC_Order_Item_Product $item, ?string $id = null ): self {
 		$product = $item->get_product();
 		assert( $product instanceof \WC_Product );
-		$quantity = $item->get_quantity();
-
-		// Calculate expected vs actual totals.
-		$expected_total = self::currency_to_unit_amount( $product->get_price() ) * $quantity;
-		$actual_total   = self::currency_to_unit_amount( $item->get_subtotal() );
+		$quantity     = $item->get_quantity();
+		$actual_total = self::currency_to_unit_amount( $item->get_subtotal() );
 
 		$price = self::from_wc( $product );
 
-		// If prices match, use the standard product-based price.
-		if ( $expected_total === $actual_total && ( null === $id || $price->id === $id ) ) {
+		// The catalog price carries the regular price, not get_price(), which add-on plugins
+		// raise. A sale must stay in lock-step with the "Sale" discount CheckoutSession adds.
+		$catalog_unit_amount = $price->unit_amount ?? 0;
+		if ( $product->get_price() === $product->get_sale_price() ) {
+			$catalog_unit_amount -= Coupon::from_wc( $product )->amount_off() ?? 0;
+		}
+
+		$matches_catalog = $catalog_unit_amount * $quantity === $actual_total;
+		if ( $matches_catalog && ( null === $id || $price->id === $id ) ) {
 			return $price;
 		}
 

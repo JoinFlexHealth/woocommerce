@@ -483,6 +483,132 @@ class PriceTest extends \WP_UnitTestCase {
 	}
 
 	/**
+	 * Add-on plugins raise get_price() so the subtotal matches it but not the regular
+	 * price the catalog Flex price carries. Flex must charge the subtotal.
+	 */
+	public function test_from_wc_item_addon_filtered_price_uses_subtotal(): void {
+		$product = new \WC_Product_Simple();
+		$product->set_name( 'Cane' );
+		$product->set_regular_price( '850.00' );
+		$product->update_meta_data( '_wc_flex_price_id', 'fprice_catalog_cane' );
+		$product->save();
+
+		$filter = static fn() => '1249.00';
+		add_filter( 'woocommerce_product_get_price', $filter );
+
+		try {
+			$order = wc_create_order();
+			self::assertInstanceOf( \WC_Order::class, $order );
+			$item_id = $order->add_product( $product, 1 );
+			$order->save();
+
+			$item = $order->get_item( $item_id );
+			self::assertInstanceOf( \WC_Order_Item_Product::class, $item );
+			self::assertEqualsWithDelta( 1249.0, (float) $item->get_subtotal(), 0.001 );
+
+			$price = Price::from_wc_item( $item );
+		} finally {
+			remove_filter( 'woocommerce_product_get_price', $filter );
+		}
+
+		self::assertNull( $price->id(), 'Add-on pricing must not reuse the catalog price ID' );
+		$json = $price->jsonSerialize();
+		self::assertSame( 124900, $json['unit_amount'] );
+		self::assertSame( 'Cane', $json['description'] );
+	}
+
+	/**
+	 * The subtotal is the per-unit add-on price times qty, so the unit amount is not doubled.
+	 */
+	public function test_from_wc_item_addon_filtered_price_with_quantity(): void {
+		$product = new \WC_Product_Simple();
+		$product->set_name( 'Cane' );
+		$product->set_regular_price( '850.00' );
+		$product->save();
+
+		$filter = static fn() => '1249.00';
+		add_filter( 'woocommerce_product_get_price', $filter );
+
+		try {
+			$order = wc_create_order();
+			self::assertInstanceOf( \WC_Order::class, $order );
+			$item_id = $order->add_product( $product, 2 );
+			$order->save();
+
+			$item = $order->get_item( $item_id );
+			self::assertInstanceOf( \WC_Order_Item_Product::class, $item );
+
+			$price = Price::from_wc_item( $item );
+		} finally {
+			remove_filter( 'woocommerce_product_get_price', $filter );
+		}
+
+		$json = $price->jsonSerialize();
+		self::assertSame( 124900, $json['unit_amount'] );
+	}
+
+	/**
+	 * A plain sale keeps the regular-price catalog price: CheckoutSession charges the
+	 * sale as that price less a "Sale" discount.
+	 */
+	public function test_from_wc_item_sale_price_uses_catalog_price(): void {
+		$product = new \WC_Product_Simple();
+		$product->set_name( 'Sale Product' );
+		$product->set_regular_price( '100.00' );
+		$product->set_sale_price( '80.00' );
+		$product->update_meta_data( '_wc_flex_price_id', 'fprice_catalog_sale' );
+		$product->save();
+
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
+		$item_id = $order->add_product( $product, 2 );
+		$order->save();
+
+		$item = $order->get_item( $item_id );
+		self::assertInstanceOf( \WC_Order_Item_Product::class, $item );
+
+		$price = Price::from_wc_item( $item );
+
+		self::assertSame( 'fprice_catalog_sale', $price->id() );
+		$json = $price->jsonSerialize();
+		self::assertSame( 10000, $json['unit_amount'] );
+	}
+
+	/**
+	 * Add-ons on a sale item move get_price() off the sale price, so CheckoutSession adds
+	 * no "Sale" discount and the line must charge its subtotal.
+	 */
+	public function test_from_wc_item_addon_on_sale_item_uses_subtotal(): void {
+		$product = new \WC_Product_Simple();
+		$product->set_name( 'Sale Cane' );
+		$product->set_regular_price( '100.00' );
+		$product->set_sale_price( '80.00' );
+		$product->update_meta_data( '_wc_flex_price_id', 'fprice_catalog_sale_cane' );
+		$product->save();
+
+		$filter = static fn() => '95.00';
+		add_filter( 'woocommerce_product_get_price', $filter );
+
+		try {
+			$order = wc_create_order();
+			self::assertInstanceOf( \WC_Order::class, $order );
+			$item_id = $order->add_product( $product, 1 );
+			$order->save();
+
+			$item = $order->get_item( $item_id );
+			self::assertInstanceOf( \WC_Order_Item_Product::class, $item );
+
+			$price = Price::from_wc_item( $item );
+		} finally {
+			remove_filter( 'woocommerce_product_get_price', $filter );
+		}
+
+		self::assertNull( $price->id() );
+		$json = $price->jsonSerialize();
+		self::assertSame( 9500, $json['unit_amount'] );
+	}
+
+	/**
 	 * A trashed variation that was previously synced to Flex should return UPDATE
 	 * so the deactivation (active: false) is pushed for its price. Hash-gated so
 	 * exec(UPDATE) -> apply_to() makes the next sync NONE.

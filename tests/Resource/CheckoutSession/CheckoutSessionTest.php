@@ -728,6 +728,40 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 	}
 
 	/**
+	 * An add-on plugin raises get_price() above the regular price; the line must reach
+	 * Flex at that price for the amount_total guard in PaymentGateway::process_payment.
+	 */
+	public function test_from_wc_line_items_match_order_total_with_addon_price(): void {
+		$product = new \WC_Product_Simple();
+		$product->set_name( 'WeWALK Smart Cane' );
+		$product->set_regular_price( '850.00' );
+		$product->set_status( 'publish' );
+		$product->save();
+
+		$filter = static fn() => '1249.00';
+		add_filter( 'woocommerce_product_get_price', $filter );
+
+		try {
+			$order = wc_create_order();
+			self::assertInstanceOf( \WC_Order::class, $order );
+			$order->add_product( $product, 1 );
+			$order->calculate_totals();
+			$order->save();
+
+			$reloaded = wc_get_order( $order->get_id() );
+			assert( $reloaded instanceof \WC_Order );
+			$session = CheckoutSession::from_wc( $reloaded );
+		} finally {
+			remove_filter( 'woocommerce_product_get_price', $filter );
+		}
+
+		$data = $session->jsonSerialize();
+		self::assertSame( array(), self::discount_amounts_off( $data ) );
+		self::assertSame( 124900, CheckoutSession::currency_to_unit_amount( $reloaded->get_total() ) );
+		self::assertSame( 124900, self::line_items_total( $session->line_items() ) );
+	}
+
+	/**
 	 * MER-2484 / WOOCOMMERCE-4B: two coupons on the same lines, re-applied from scratch,
 	 * stack onto every shared line and over-discount (Thrival 143119: $147.50 vs $95
 	 * recorded), dropping the Flex total below the order total and tripping the
