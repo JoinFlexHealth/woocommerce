@@ -10,12 +10,111 @@ declare(strict_types=1);
 namespace Flex\Tests\Resource;
 
 use Flex\Resource\Price;
+use Flex\Resource\Product;
 use Flex\Resource\ResourceAction;
 
 /**
  * Tests for the Price resource.
  */
 class PriceTest extends \WP_UnitTestCase {
+
+	/**
+	 * The registered pre_http_request callback, so it can be removed in teardown.
+	 *
+	 * @var ?callable
+	 */
+	private $http_filter = null;
+
+	/**
+	 * {@inheritDoc}
+	 */
+	public function tear_down(): void {
+		if ( null !== $this->http_filter ) {
+			remove_filter( 'pre_http_request', $this->http_filter, 10 );
+			$this->http_filter = null;
+		}
+		delete_option( 'woocommerce_flex_settings' );
+		parent::tear_down();
+	}
+
+	/**
+	 * Record every outbound request and answer it with the given price id.
+	 *
+	 * @param string $returned_id The price id every price response carries.
+	 *
+	 * @return \ArrayObject<int, array{method: string, url: string, key: string}>
+	 */
+	private function record_requests( string $returned_id ): \ArrayObject {
+		update_option(
+			'woocommerce_flex_settings',
+			array(
+				'enabled' => 'no',
+				'api_key' => 'sk_test_price',
+			)
+		);
+
+		$requests          = new \ArrayObject();
+		$this->http_filter = function ( $pre, array $args, string $url ) use ( $requests, $returned_id ) {
+			unset( $pre );
+			$headers = isset( $args['headers'] ) && is_array( $args['headers'] ) ? $args['headers'] : array();
+			$requests->append(
+				array(
+					'method' => isset( $args['method'] ) && is_string( $args['method'] ) ? $args['method'] : 'GET',
+					'url'    => $url,
+					'key'    => isset( $headers['Idempotency-Key'] ) && is_string( $headers['Idempotency-Key'] ) ? $headers['Idempotency-Key'] : '',
+				)
+			);
+			return array(
+				'response' => array(
+					'code'    => 200,
+					'message' => '',
+				),
+				'body'     => (string) wp_json_encode( array( 'price' => array( 'price_id' => $returned_id ) ) ),
+				'headers'  => array(),
+				'cookies'  => array(),
+			);
+		};
+		add_filter( 'pre_http_request', $this->http_filter, 10, 3 );
+
+		return $requests;
+	}
+
+	/**
+	 * Re-creating the same content for a different replaced price sends a different
+	 * Idempotency-Key; re-sending the same create keeps the key so retries dedupe.
+	 */
+	public function test_create_idempotency_key_depends_on_replaced_price(): void {
+		$requests = $this->record_requests( 'fprice_created' );
+		$product  = new Product( id: 'fprod_x' );
+
+		$keys = array();
+		foreach ( array( 'fprice_a', 'fprice_b', 'fprice_a' ) as $id ) {
+			$requests->exchangeArray( array() );
+			( new Price( product: $product, id: $id, unit_amount: 2495 ) )->exec( ResourceAction::CREATE );
+			$is_create = fn ( array $r ): bool => 'POST' === $r['method'] && is_string( $r['url'] ) && str_ends_with( $r['url'], '/v1/prices' );
+			$creates   = array_values( array_filter( $requests->getArrayCopy(), $is_create ) );
+			self::assertCount( 1, $creates );
+			$keys[] = $creates[0]['key'];
+		}
+
+		self::assertNotSame( $keys[0], $keys[1], 'Different replaced prices must not share a create key' );
+		self::assertSame( $keys[0], $keys[2], 'The same create must keep its key so a retry replays' );
+	}
+
+	/**
+	 * A create that returns the price it replaces must not deactivate that price.
+	 */
+	public function test_create_returning_replaced_id_does_not_deactivate_it(): void {
+		$requests = $this->record_requests( 'fprice_a' );
+
+		$price = new Price( product: new Product( id: 'fprod_x' ), id: 'fprice_a', unit_amount: 2495 );
+		$price->exec( ResourceAction::CREATE );
+
+		$is_deactivate = fn ( array $r ): bool => 'POST' === $r['method'] && is_string( $r['url'] ) && str_ends_with( $r['url'], '/v1/prices/fprice_a' );
+		$updates       = array_filter( $requests->getArrayCopy(), $is_deactivate );
+		self::assertSame( 'fprice_a', $price->id() );
+		self::assertSame( array(), $updates, 'The returned price must not be deactivated' );
+	}
 
 	/**
 	 * Price::is_purchasable_unit returns true for purchasable leaves.
@@ -408,7 +507,7 @@ class PriceTest extends \WP_UnitTestCase {
 
 		// Seed the "previously synced" state for the price.
 		( new \Flex\Resource\Price(
-			product: new \Flex\Resource\Product( id: 'fprod_1' ),
+			product: new Product( id: 'fprod_1' ),
 			id: 'fprice_1',
 			active: true,
 			unit_amount: 1500,
@@ -446,7 +545,7 @@ class PriceTest extends \WP_UnitTestCase {
 
 		// Seed the "previously synced" state for the price (active while published).
 		( new \Flex\Resource\Price(
-			product: new \Flex\Resource\Product( id: 'fprod_1' ),
+			product: new Product( id: 'fprod_1' ),
 			id: 'fprice_1',
 			active: true,
 			unit_amount: 2000,

@@ -20,6 +20,7 @@ use Flex\Resource\CheckoutSession\CheckoutSession;
 use Flex\Resource\CheckoutSession\LineItem;
 use Flex\Resource\CheckoutSession\Status;
 use Flex\Resource\Price;
+use Flex\Resource\Product;
 use Flex\Resource\ResourceAction;
 
 /**
@@ -181,6 +182,146 @@ class CheckoutSessionRecoveryTest extends \WP_UnitTestCase {
 		self::assertSame( 'fcs_recovered', $session->id(), 'Session should be created after recovering the stale price' );
 		self::assertSame( 'fprice_new', $line_item->price()->id(), 'Stale price should have been recreated' );
 		self::assertSame( 2, $sessions, 'Session create should be retried exactly once' );
+	}
+
+	/**
+	 * Recovery must not deactivate a price recreated earlier in the same request,
+	 * given the backend's (Idempotency-Key, URL) replay of successful responses.
+	 */
+	public function test_exec_recovery_does_not_deactivate_price_recreated_in_same_request(): void {
+		$this->set_api_key();
+
+		$idempotency_cache = array();
+		$active            = array( 'fprice_old' => true );
+		$created           = 0;
+		$sessions          = 0;
+		$retry_price       = null;
+		$this->mock_http(
+			function ( $pre, array $args, string $url ) use ( &$idempotency_cache, &$active, &$created, &$sessions, &$retry_price ) {
+				$method    = isset( $args['method'] ) && is_string( $args['method'] ) ? $args['method'] : 'GET';
+				$path      = (string) wp_parse_url( $url, PHP_URL_PATH );
+				$headers   = isset( $args['headers'] ) && is_array( $args['headers'] ) ? $args['headers'] : array();
+				$key       = isset( $headers['Idempotency-Key'] ) && is_string( $headers['Idempotency-Key'] ) ? $headers['Idempotency-Key'] : '';
+				$cache_key = $key . ' ' . $url;
+				$raw_body  = isset( $args['body'] ) && is_string( $args['body'] ) ? $args['body'] : '';
+
+				if ( 'POST' === $method ) {
+					if ( isset( $idempotency_cache[ $cache_key ] ) ) {
+						return $idempotency_cache[ $cache_key ];
+					}
+				}
+
+				if ( '/v1/checkout/sessions' === $path ) {
+					++$sessions;
+					/**
+					 * The checkout session create body.
+					 *
+					 * @var array{checkout_session: array{line_items: list<array{price: string}>}} $body
+					 */
+					$body      = json_decode( $raw_body, true );
+					$sent      = array_column( $body['checkout_session']['line_items'], 'price' );
+					$all_valid = array() === array_filter( $sent, fn ( string $id ) => ! ( $active[ $id ] ?? false ) );
+					if ( ! $all_valid ) {
+						$response = $this->response(
+							422,
+							array(
+								'detail' => array(
+									array(
+										'loc'  => array( 'price' ),
+										'msg'  => 'price_not_found: One or more prices are not valid',
+										'type' => 'price_not_found',
+									),
+								),
+							)
+						);
+					} else {
+						$retry_price = $sent[0];
+						$response    = $this->response(
+							200,
+							array(
+								'checkout_session' => array(
+									'checkout_session_id' => 'fcs_recovered',
+									'success_url'         => 'https://example.com/success',
+									'status'              => 'open',
+									'redirect_url'        => 'https://pay.example/redirect',
+								),
+							)
+						);
+					}
+				} elseif ( '/v1/prices' === $path ) {
+					++$created;
+					$id            = 'fprice_new_' . $created;
+					$active[ $id ] = true;
+					$response      = $this->response( 200, array( 'price' => array( 'price_id' => $id ) ) );
+				} elseif ( str_starts_with( $path, '/v1/prices/' ) ) {
+					$id = substr( $path, strlen( '/v1/prices/' ) );
+					if ( ! isset( $active[ $id ] ) ) {
+						return $this->response( 404, array( 'detail' => 'not_found' ) );
+					}
+					if ( 'POST' === $method ) {
+						/**
+						 * The price update body.
+						 *
+						 * @var array{price: array{active: bool}} $body
+						 */
+						$body          = json_decode( $raw_body, true );
+						$active[ $id ] = $body['price']['active'];
+					}
+					$response = $this->response(
+						200,
+						array(
+							'price' => array(
+								'price_id'    => $id,
+								'active'      => $active[ $id ],
+								'unit_amount' => 2495,
+								'product'     => 'fprod_x',
+							),
+						)
+					);
+				} else {
+					return $pre;
+				}
+
+				// Like the backend, cache only successful responses.
+				if ( 'POST' === $method && 200 === wp_remote_retrieve_response_code( $response ) ) {
+					$idempotency_cache[ $cache_key ] = $response;
+				}
+				return $response;
+			}
+		);
+
+		$price = new Price(
+			product: new Product( id: 'fprod_x' ),
+			id: 'fprice_old',
+			unit_amount: 2495,
+		);
+		// The dependency pass recreates the price after a catalog price change.
+		$price->exec( ResourceAction::CREATE );
+		$recreated = $price->id();
+		self::assertSame( 'fprice_new_1', $recreated );
+		self::assertFalse( $active['fprice_old'] );
+
+		// A sibling's stored price no longer resolves, so the first create returns 422.
+		$sibling = new Price(
+			product: new Product( id: 'fprod_y' ),
+			id: 'fprice_sibling_stale',
+			unit_amount: 1000,
+		);
+		$session = new CheckoutSession(
+			success_url: 'https://example.com/success',
+			line_items: array(
+				new LineItem( price: $price, quantity: 1 ),
+				new LineItem( price: $sibling, quantity: 1 ),
+			),
+			status: Status::OPEN,
+		);
+		$session->exec( ResourceAction::CREATE );
+
+		self::assertSame( 'fcs_recovered', $session->id() );
+		self::assertSame( 2, $sessions, 'Session create should be retried exactly once' );
+		self::assertSame( $price->id(), $retry_price, 'Retry should send the price the recovery pass produced' );
+		self::assertNotNull( $retry_price );
+		self::assertTrue( $active[ $retry_price ], 'The price sent on retry must be active' );
 	}
 
 	/**

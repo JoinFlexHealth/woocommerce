@@ -51,6 +51,14 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 	}
 
 	/**
+	 * The API replays a cached success for a repeated (key, URL) pair for 12 hours,
+	 * so two requests that must not share a result need different keys.
+	 */
+	protected function idempotency_key(): string {
+		return $this->hash();
+	}
+
+	/**
 	 * Safely convert a currency amount (from WooCommerce) to a Flex unit amount.
 	 *
 	 * @param int|float|string $value The currency value to convert to a unit amount.
@@ -128,7 +136,7 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 
 		// Add idempotency key for mutating requests.
 		if ( 'GET' !== $method ) {
-			$headers['Idempotency-Key'] = $this->hash();
+			$headers['Idempotency-Key'] = $this->idempotency_key();
 		}
 
 		/**

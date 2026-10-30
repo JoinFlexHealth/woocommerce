@@ -73,6 +73,16 @@ class Price extends Resource implements ResourceInterface {
 	}
 
 	/**
+	 * {@inheritdoc}
+	 *
+	 * Every create posts to the same URL and hash() omits the id, so without it a
+	 * re-create of unchanged content replays the price it is meant to replace.
+	 */
+	protected function idempotency_key(): string {
+		return wp_hash( $this->hash() . '|' . ( $this->id ?? '' ) );
+	}
+
+	/**
 	 * Create a new price from a WooCommerce Product.
 	 * Since WooCommerce is the system-of-record, this product represents the intended state.
 	 *
@@ -436,9 +446,19 @@ class Price extends Resource implements ResourceInterface {
 			$this->wc?->save();
 		}
 
-		// Deactivate the existing Product.
-		if ( null !== $existing ) {
-			$existing->exec( ResourceAction::UPDATE );
+		if ( null === $existing ) {
+			return;
 		}
+
+		// Hazard: deactivating an id the create returned leaves this price inactive.
+		if ( $existing->id() === $this->id ) {
+			wc_get_logger()->warning(
+				'[Flex] Price create returned the price it replaces; skipping deactivation.',
+				array( 'price_id' => $this->id ),
+			);
+			return;
+		}
+
+		$existing->exec( ResourceAction::UPDATE );
 	}
 }
