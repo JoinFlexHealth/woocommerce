@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace Flex\Resource;
 
 use Flex\Exception\FlexException;
+use Flex\Exception\FlexMerchantException;
 use Flex\Exception\FlexResponseException;
 use Flex\PaymentGateway;
 use Sentry\Breadcrumb;
@@ -104,6 +105,7 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 	 *
 	 * @return array<string, mixed>
 	 *
+	 * @throws FlexMerchantException If the API key is not set.
 	 * @throws FlexException When things don't go well.
 	 * @throws FlexResponseException When Flex responds with something other than OK.
 	 * @throws \Throwable If the JSON decoding fails.
@@ -111,7 +113,7 @@ abstract class Resource implements ResourceInterface, \JsonSerializable {
 	protected function remote_request( string $path, array $args = array() ): array {
 		$api_key = self::payment_gateway()->api_key();
 		if ( null === $api_key || '' === $api_key ) {
-			throw new FlexException( 'API Key is not set' );
+			throw new FlexMerchantException( 'API Key is not set' );
 		}
 
 		$base = defined( 'FLEX_API_URL' ) ? \FLEX_API_URL : 'https://api.withflex.com';

@@ -31,19 +31,6 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 	use PHPMock;
 
 	/**
-	 * Define the namespaced function_exists() override up front.
-	 *
-	 * The php-mock library works via PHP's namespace fallback, and the override must
-	 * exist before the first unqualified call to function_exists() in this namespace
-	 * — which other tests here trigger via from_wc(). Defining it now keeps it inert
-	 * (delegating to the real function) until a test enables a mock on it.
-	 */
-	public static function setUpBeforeClass(): void {
-		parent::setUpBeforeClass();
-		self::defineFunctionMock( 'Flex\\Resource\\CheckoutSession', 'function_exists' );
-	}
-
-	/**
 	 * Test that needs() returns NONE when status is COMPLETE.
 	 */
 	public function test_needs_returns_none_when_status_is_complete(): void {

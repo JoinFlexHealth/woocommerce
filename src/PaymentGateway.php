@@ -11,6 +11,7 @@ namespace Flex;
 
 use Automattic\WooCommerce\Enums\OrderStatus;
 use Flex\Exception\FlexException;
+use Flex\Exception\FlexMerchantException;
 use Flex\Exception\FlexResponseException;
 use Flex\Resource\CheckoutSession\CheckoutSession;
 use Flex\Resource\CheckoutSession\Refund\Refund;
@@ -270,10 +271,12 @@ class PaymentGateway extends \WC_Payment_Gateway {
 	 * @param  float|null $amount Refund amount.
 	 * @param  string     $reason Refund reason.
 	 * @return bool|\WP_Error True or false based on success, or a WP_Error object.
-	 * @throws FlexException If we can intuit the refund from the amount and reason.
-	 * @throws \Exception When a FlexException is caught.
+	 * @throws FlexMerchantException Never escapes: caught below and rethrown as \Exception.
+	 * @throws \Exception When the refund fails; the message tells the merchant why.
 	 */
 	public function process_refund( $order_id, $amount = null, $reason = '' ) {
+		$order = null;
+
 		sentry()->configureScope(
 			function ( Scope $scope ) use ( $order_id, $amount, $reason ): void {
 				$scope->addBreadcrumb(
@@ -295,7 +298,7 @@ class PaymentGateway extends \WC_Payment_Gateway {
 		try {
 			$order = wc_get_order( $order_id );
 			if ( ! $order instanceof \WC_Order ) {
-				throw new FlexException( message: 'Order not found', context: array( 'order_id' => $order_id ) );
+				throw new FlexMerchantException( message: "Order {$order_id} not found.", context: array( 'order_id' => $order_id ) );
 			}
 
 			sentry()->configureScope(
@@ -335,7 +338,7 @@ class PaymentGateway extends \WC_Payment_Gateway {
 			$refund = reset( $refunds );
 
 			if ( false === $refund ) {
-				throw new FlexException( 'Unable to retrieve refund' );
+				throw new FlexMerchantException( 'This order has no WooCommerce refund to send to Flex. Create the refund with wc_create_refund() or from the order screen instead of calling process_refund() directly.' );
 			}
 
 			sentry()->configureScope(
@@ -351,7 +354,15 @@ class PaymentGateway extends \WC_Payment_Gateway {
 			);
 
 			if ( $refund->get_amount() !== $amount || $refund->get_reason() !== $reason ) {
-				throw new FlexException( 'Refund amount or reason does not match retrieved refund.' );
+				throw new FlexMerchantException(
+					message: sprintf(
+						'The refund amount or reason (%s, "%s") does not match the latest WooCommerce refund on this order (%s, "%s"). Create the refund with wc_create_refund() or from the order screen instead of calling process_refund() directly.',
+						wp_json_encode( $amount ),
+						$reason,
+						$refund->get_amount(),
+						$refund->get_reason(),
+					),
+				);
 			}
 
 			// Ensure the Webhooks are up to date.
@@ -366,35 +377,74 @@ class PaymentGateway extends \WC_Payment_Gateway {
 				array_merge(
 					$previous->getContext(),
 					array(
-						'refund_id' => $order_id,
+						'order_id' => $order_id,
 					),
 				),
 			);
 
-			sentry()->captureException(
-				new \Exception(
-					message: 'Refund processing failure',
-					previous: $previous,
-				)
-			);
+			$message = 'Flex could not process this refund: ' . self::refund_failure_reason( $previous );
 
-			if ( true === \WP_DEBUG ) {
-				// Throw the underlying error message which will be displayed the user.
-				if ( true === \WP_DEBUG_DISPLAY ) {
-					throw $previous;
-				}
+			if ( $order instanceof \WC_Order ) {
+				$order->add_order_note( $message );
+			}
 
-				// Log the underlying error message.
-				error_log( $previous->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+			if ( ! $previous instanceof FlexMerchantException && ! self::is_client_error( $previous ) ) {
+				sentry()->captureException(
+					new \Exception(
+						message: 'Refund processing failure: ' . self::refund_failure_cause( $previous ),
+						previous: $previous,
+					)
+				);
 			}
 
 			throw new \Exception(
-				message: "We're sorry, there was a problem while attempting to processes the refund with Flex. Please try again later.",
+				message: $message, // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 				previous: $previous, // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 			);
 		}
 
 		return true;
+	}
+
+	/**
+	 * Why a refund failed, in words the merchant can act on.
+	 *
+	 * Flex's own explanation when the API gave one; never the raw response body.
+	 *
+	 * @param FlexException $previous The caught exception.
+	 */
+	protected static function refund_failure_reason( FlexException $previous ): string {
+		if ( $previous instanceof FlexResponseException ) {
+			$detail = $previous->detail();
+
+			if ( (int) $previous->code() < 500 ) {
+				return $detail ?? sprintf( 'Flex rejected the refund (HTTP %s).', $previous->code() );
+			}
+
+			return null === $detail
+				? sprintf( 'Flex returned an unexpected error (HTTP %s). Please try again later.', $previous->code() )
+				: rtrim( $detail, '.' ) . '. Please try again later.';
+		}
+
+		$message = $previous->getMessage();
+
+		return str_starts_with( $message, FlexException::PREFIX ) ? substr( $message, strlen( FlexException::PREFIX ) ) : $message;
+	}
+
+	/**
+	 * Why a refund failed, for the Sentry title: the status and Flex's explanation, never
+	 * the raw response body, so events group by cause.
+	 *
+	 * @param FlexException $previous The caught exception.
+	 */
+	protected static function refund_failure_cause( FlexException $previous ): string {
+		if ( ! $previous instanceof FlexResponseException ) {
+			return $previous->getMessage();
+		}
+
+		$detail = $previous->detail();
+
+		return sprintf( 'HTTP %s', $previous->code() ) . ( null === $detail ? '' : ': ' . $detail );
 	}
 
 	/**

@@ -15,6 +15,11 @@ namespace Flex\Exception;
 class FlexException extends \Exception {
 
 	/**
+	 * Prepended to every message.
+	 */
+	public const PREFIX = '[Flex] ';
+
+	/**
 	 * {@inheritdoc}
 	 *
 	 * @param string              $message The error message.
@@ -23,7 +28,7 @@ class FlexException extends \Exception {
 	 */
 	public function __construct( string $message = '', ?\Throwable $previous = null, protected array $context = array() ) {
 		parent::__construct(
-			message: trim( '[Flex] ' . $message ),
+			message: trim( self::PREFIX . $message ),
 			previous: $previous,
 		);
 	}

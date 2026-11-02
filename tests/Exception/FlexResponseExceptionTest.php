@@ -88,4 +88,91 @@ class FlexResponseExceptionTest extends \WP_UnitTestCase {
 
 		self::assertNull( $e->errorType() );
 	}
+
+	/**
+	 * A standard error carries its explanation as a string `detail`.
+	 */
+	public function test_detail_reads_standard_error(): void {
+		$e = new FlexResponseException(
+			$this->response(
+				400,
+				array(
+					'code'   => 'refund_amount_too_large',
+					'detail' => 'Refund amount exceeds the amount captured',
+				)
+			)
+		);
+
+		self::assertSame( 'Refund amount exceeds the amount captured', $e->detail() );
+	}
+
+	/**
+	 * A validation error joins the `msg` of every entry.
+	 */
+	public function test_detail_joins_validation_messages(): void {
+		$e = new FlexResponseException(
+			$this->response(
+				422,
+				array(
+					'detail' => array(
+						array(
+							'loc'  => array( 'a' ),
+							'msg'  => 'first problem',
+							'type' => 'value_error',
+						),
+						array(
+							'loc'  => array( 'b' ),
+							'msg'  => 'second problem',
+							'type' => 'value_error',
+						),
+					),
+				)
+			)
+		);
+
+		self::assertSame( 'first problem; second problem', $e->detail() );
+	}
+
+	/**
+	 * A body with no usable explanation yields null, so callers fall back to their own wording.
+	 */
+	public function test_detail_returns_null_without_explanation(): void {
+		$html = new FlexResponseException(
+			array(
+				'response' => array(
+					'code'    => 502,
+					'message' => '',
+				),
+				'body'     => '<html>Bad Gateway</html>',
+				'headers'  => array(),
+			)
+		);
+
+		self::assertNull( $html->detail() );
+		self::assertNull( ( new FlexResponseException( $this->response( 500, array( 'detail' => '' ) ) ) )->detail() );
+		self::assertNull( ( new FlexResponseException( $this->response( 500, array( 'detail' => '   ' ) ) ) )->detail() );
+		self::assertNull(
+			( new FlexResponseException(
+				$this->response(
+					422,
+					array(
+						'detail' => array(
+							array(
+								'loc'  => array( 'a' ),
+								'msg'  => " \n",
+								'type' => 'value_error',
+							),
+						),
+					)
+				)
+			) )->detail()
+		);
+	}
+
+	/**
+	 * Surrounding whitespace is trimmed from each explanation.
+	 */
+	public function test_detail_trims_whitespace(): void {
+		self::assertSame( 'Refund too large', ( new FlexResponseException( $this->response( 400, array( 'detail' => '  Refund too large ' ) ) ) )->detail() );
+	}
 }

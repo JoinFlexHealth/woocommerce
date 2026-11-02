@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace Flex\Resource\CheckoutSession\Refund;
 
 use Flex\Exception\FlexException;
+use Flex\Exception\FlexMerchantException;
 use Flex\Resource\CheckoutSession\LineItem as CheckoutSessionLineItem;
 use Flex\Resource\Resource;
 use Flex\Resource\ResourceAction;
@@ -70,7 +71,7 @@ class Refund extends Resource {
 	 * Creates a Checkout Session Refund from a WooCommerce Refund.
 	 *
 	 * @param \WC_Order_Refund $refund the WooCommerce Refund.
-	 * @throws FlexException If no line items can be established.
+	 * @throws FlexMerchantException If no line items can be established.
 	 */
 	public static function from_wc( \WC_Order_Refund $refund ): self {
 		$refund_amount = self::currency_to_unit_amount( $refund->get_total() );
@@ -124,7 +125,7 @@ class Refund extends Resource {
 		}
 
 		if ( array() === $cs_refund->line_items ) {
-			throw new FlexException( 'Refunds can only be made against line items' );
+			throw new FlexMerchantException( 'Refunds can only be made against line items, and this order has no product lines.' );
 		}
 
 		// Now that we have all of the line items proportionally setup, we need to deal with any rounding errors by

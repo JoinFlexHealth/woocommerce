@@ -49,6 +49,60 @@ class FlexResponseException extends FlexException {
 	 * rather than the overloaded 422 status.
 	 */
 	public function errorType(): ?string {
+		$data = $this->body();
+
+		if ( null === $data || ! isset( $data['detail'] ) || ! is_array( $data['detail'] ) ) {
+			return null;
+		}
+
+		foreach ( $data['detail'] as $item ) {
+			if ( is_array( $item ) && isset( $item['type'] ) && is_string( $item['type'] ) ) {
+				return $item['type'];
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Get the human-readable explanation Flex gave for the error.
+	 *
+	 * Reads `detail` as a string (`{"code":"...","detail":"..."}`) or joins the `msg` of each
+	 * validation entry. Returns null when the body carries neither, e.g. an HTML 502 page.
+	 */
+	public function detail(): ?string {
+		$data = $this->body();
+
+		if ( null === $data || ! isset( $data['detail'] ) ) {
+			return null;
+		}
+
+		if ( is_string( $data['detail'] ) ) {
+			$detail = trim( $data['detail'] );
+			return '' === $detail ? null : $detail;
+		}
+
+		if ( ! is_array( $data['detail'] ) ) {
+			return null;
+		}
+
+		$messages = array();
+		foreach ( $data['detail'] as $item ) {
+			$msg = is_array( $item ) && isset( $item['msg'] ) && is_string( $item['msg'] ) ? trim( $item['msg'] ) : '';
+			if ( '' !== $msg ) {
+				$messages[] = $msg;
+			}
+		}
+
+		return array() === $messages ? null : implode( '; ', $messages );
+	}
+
+	/**
+	 * Decode the response body as a JSON object.
+	 *
+	 * @return ?array<mixed> Null when the body is empty or not a JSON object.
+	 */
+	private function body(): ?array {
 		$body = wp_remote_retrieve_body( $this->response );
 		if ( '' === $body ) {
 			return null;
@@ -60,17 +114,7 @@ class FlexResponseException extends FlexException {
 			return null;
 		}
 
-		if ( ! is_array( $data ) || ! isset( $data['detail'] ) || ! is_array( $data['detail'] ) ) {
-			return null;
-		}
-
-		foreach ( $data['detail'] as $item ) {
-			if ( is_array( $item ) && isset( $item['type'] ) && is_string( $item['type'] ) ) {
-				return $item['type'];
-			}
-		}
-
-		return null;
+		return is_array( $data ) ? $data : null;
 	}
 
 	/**

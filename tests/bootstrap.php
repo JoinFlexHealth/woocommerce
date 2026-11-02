@@ -104,5 +104,14 @@ function _manually_load_plugin(): void {
 
 tests_add_filter( 'muplugins_loaded', '_manually_load_plugin' );
 
+// php-mock needs this override defined before any test's first function_exists() call in the
+// namespace: PHP caches the resolution after that. Inert until a test enables a mock on it.
+( new \phpmock\MockBuilder() )
+	->setNamespace( 'Flex\\Resource\\CheckoutSession' )
+	->setName( 'function_exists' )
+	->setFunction( static function (): void {} )
+	->build()
+	->define();
+
 // Start up the WP testing environment.
 require "{$_tests_dir}/includes/bootstrap.php";
