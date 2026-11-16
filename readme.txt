@@ -3,7 +3,7 @@ Contributors: withflex, davidbarratt
 Tags: hsa, fsa, payments, woocommerce
 Requires at least: 6.7
 Tested up to: 7.0
-Stable tag: 3.3.11
+Stable tag: 3.3.12
 Requires PHP: 8.1
 License: GPLv3 or later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -54,6 +54,11 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 4. Flex promotes your brand to engaged buyers looking to spend the $150B in HSA/FSA accounts.
 
 == Changelog ==
+
+= 3.3.12 =
+* Refund failures now show the merchant the reason Flex returned, instead of a generic error.
+* Fixed checkout failing for products with add-ons or other price-adjusting plugins: Flex sent the catalog price instead of the price WooCommerce charged.
+* Fixed a checkout failure where price recovery deactivated the price it was about to use.
 
 = 3.3.11 =
 * Updated the "How to Get Started" section.
