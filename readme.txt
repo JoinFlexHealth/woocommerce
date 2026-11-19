@@ -3,7 +3,7 @@ Contributors: withflex, davidbarratt
 Tags: hsa, fsa, payments, woocommerce
 Requires at least: 6.7
 Tested up to: 7.0
-Stable tag: 3.3.12
+Stable tag: 3.3.13
 Requires PHP: 8.1
 License: GPLv3 or later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -54,6 +54,9 @@ Flex makes this process simple by offering asynchronous telehealth visits direct
 4. Flex promotes your brand to engaged buyers looking to spend the $150B in HSA/FSA accounts.
 
 == Changelog ==
+
+= 3.3.13 =
+* Fixed checkout failing, and incorrect amounts being sent to Flex, on stores that use a comma as the decimal separator.
 
 = 3.3.12 =
 * Refund failures now show the merchant the reason Flex returned, instead of a generic error.
