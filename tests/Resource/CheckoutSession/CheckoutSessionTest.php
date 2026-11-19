@@ -749,6 +749,34 @@ class CheckoutSessionTest extends \WP_UnitTestCase {
 	}
 
 	/**
+	 * Test the order total against the line items on a comma-decimal store.
+	 */
+	public function test_from_wc_order_total_matches_line_items_with_comma_decimal_separator(): void {
+		update_option( 'woocommerce_price_decimal_sep', ',' );
+		update_option( 'woocommerce_price_thousand_sep', '.' );
+
+		$product = new \WC_Product_Simple();
+		$product->set_name( 'WeWALK Smart Cane' );
+		$product->set_regular_price( '1249.00' );
+		$product->set_status( 'publish' );
+		$product->save();
+
+		$order = wc_create_order();
+		self::assertInstanceOf( \WC_Order::class, $order );
+		$order->add_product( $product, 1 );
+		$order->calculate_totals();
+		$order->save();
+
+		$reloaded = wc_get_order( $order->get_id() );
+		assert( $reloaded instanceof \WC_Order );
+		$session = CheckoutSession::from_wc( $reloaded );
+
+		self::assertSame( '1249.00', $reloaded->get_total() );
+		self::assertSame( 124900, CheckoutSession::currency_to_unit_amount( $reloaded->get_total() ) );
+		self::assertSame( 124900, self::line_items_total( $session->line_items() ) );
+	}
+
+	/**
 	 * MER-2484 / WOOCOMMERCE-4B: two coupons on the same lines, re-applied from scratch,
 	 * stack onto every shared line and over-discount (Thrival 143119: $147.50 vs $95
 	 * recorded), dropping the Flex total below the order total and tripping the

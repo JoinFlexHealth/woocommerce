@@ -15,7 +15,7 @@ use Flex\Resource\Resource;
  * Test the currency conversion functionality.
  *
  * Note: WooCommerce must be loaded for these tests to work since
- * currency_to_unit_amount() calls wc_get_price_decimal_separator() etc.
+ * currency_to_unit_amount() calls get_woocommerce_currency_symbol().
  */
 class ResourceTest extends \WP_UnitTestCase {
 
@@ -145,6 +145,30 @@ class ResourceTest extends \WP_UnitTestCase {
 		self::assertSame( 99999999, Resource::currency_to_unit_amount( '999999.99' ) );
 		self::assertSame( 100000000, Resource::currency_to_unit_amount( '1000000.00' ) );
 		self::assertSame( 100000000, Resource::currency_to_unit_amount( '1,000,000' ) );
+	}
+
+	/**
+	 * Test that a comma is always grouping, never a decimal separator.
+	 */
+	public function test_comma_is_treated_as_grouping_not_decimal(): void {
+		update_option( 'woocommerce_price_decimal_sep', ',' );
+		update_option( 'woocommerce_price_thousand_sep', '.' );
+
+		self::assertSame( 12490000, Resource::currency_to_unit_amount( '1249,00' ) );
+		self::assertSame( 371, Resource::currency_to_unit_amount( '3.711,30' ) );
+	}
+
+	/**
+	 * Test European number format.
+	 */
+	public function test_european_number_format_does_not_inflate(): void {
+		update_option( 'woocommerce_price_decimal_sep', ',' );
+		update_option( 'woocommerce_price_thousand_sep', '.' );
+
+		self::assertSame( 371130, Resource::currency_to_unit_amount( '3711.30' ) );
+		self::assertSame( 902840, Resource::currency_to_unit_amount( '9028.40' ) );
+		self::assertSame( 2314150, Resource::currency_to_unit_amount( '23141.50' ) );
+		self::assertSame( 10000, Resource::currency_to_unit_amount( '100' ) );
 	}
 
 	/**
